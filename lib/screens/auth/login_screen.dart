@@ -16,6 +16,7 @@ class _LoginScreenState extends State<LoginScreen> {
   final _emailController = TextEditingController();
   final _passwordController = TextEditingController();
   bool _isLoading = false;
+  bool _obscurePassword = true;
   String? _errorMessage;
 
   @override
@@ -29,6 +30,9 @@ class _LoginScreenState extends State<LoginScreen> {
     if (!_formKey.currentState!.validate()) {
       return;
     }
+
+    // キーボードを閉じる
+    FocusScope.of(context).unfocus();
 
     setState(() {
       _isLoading = true;
@@ -48,8 +52,20 @@ class _LoginScreenState extends State<LoginScreen> {
         );
       }
     } catch (e) {
+      String errorMessage = 'ログインに失敗しました';
+      
+      final errorString = e.toString().toLowerCase();
+      if (errorString.contains('invalid login credentials') ||
+          errorString.contains('invalid email or password')) {
+        errorMessage = 'メールアドレスまたはパスワードが正しくありません';
+      } else if (errorString.contains('email not confirmed')) {
+        errorMessage = 'メールアドレスが確認されていません。\nメールを確認してください。';
+      } else if (errorString.contains('network')) {
+        errorMessage = 'ネットワークエラーが発生しました。\n接続を確認してください。';
+      }
+      
       setState(() {
-        _errorMessage = 'ログインに失敗しました: ${e.toString()}';
+        _errorMessage = errorMessage;
       });
     } finally {
       if (mounted) {
@@ -105,6 +121,9 @@ class _LoginScreenState extends State<LoginScreen> {
                     prefixIcon: Icon(Icons.email),
                   ),
                   keyboardType: TextInputType.emailAddress,
+                  textInputAction: TextInputAction.next,
+                  autocorrect: false,
+                  enabled: !_isLoading,
                   validator: (value) {
                     if (value == null || value.isEmpty) {
                       return 'メールアドレスを入力してください';
@@ -120,12 +139,27 @@ class _LoginScreenState extends State<LoginScreen> {
                 // パスワード入力
                 TextFormField(
                   controller: _passwordController,
-                  decoration: const InputDecoration(
+                  decoration: InputDecoration(
                     labelText: 'パスワード',
-                    border: OutlineInputBorder(),
-                    prefixIcon: Icon(Icons.lock),
+                    border: const OutlineInputBorder(),
+                    prefixIcon: const Icon(Icons.lock),
+                    suffixIcon: IconButton(
+                      icon: Icon(
+                        _obscurePassword
+                            ? Icons.visibility_off
+                            : Icons.visibility,
+                      ),
+                      onPressed: () {
+                        setState(() {
+                          _obscurePassword = !_obscurePassword;
+                        });
+                      },
+                    ),
                   ),
-                  obscureText: true,
+                  obscureText: _obscurePassword,
+                  textInputAction: TextInputAction.done,
+                  enabled: !_isLoading,
+                  onFieldSubmitted: (_) => _handleLogin(),
                   validator: (value) {
                     if (value == null || value.isEmpty) {
                       return 'パスワードを入力してください';
@@ -142,30 +176,49 @@ class _LoginScreenState extends State<LoginScreen> {
                 if (_errorMessage != null)
                   Container(
                     padding: const EdgeInsets.all(12),
+                    margin: const EdgeInsets.only(bottom: 16),
                     decoration: BoxDecoration(
                       color: Colors.red[100],
                       borderRadius: BorderRadius.circular(8),
+                      border: Border.all(color: Colors.red[300]!),
                     ),
-                    child: Text(
-                      _errorMessage!,
-                      style: TextStyle(color: Colors.red[900]),
+                    child: Row(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Icon(Icons.error_outline, color: Colors.red[900]),
+                        const SizedBox(width: 12),
+                        Expanded(
+                          child: Text(
+                            _errorMessage!,
+                            style: TextStyle(color: Colors.red[900]),
+                          ),
+                        ),
+                      ],
                     ),
                   ),
-                if (_errorMessage != null) const SizedBox(height: 16),
 
                 // ログインボタン
                 ElevatedButton(
                   onPressed: _isLoading ? null : _handleLogin,
                   style: ElevatedButton.styleFrom(
                     padding: const EdgeInsets.symmetric(vertical: 16),
+                    backgroundColor: Colors.blue,
+                    foregroundColor: Colors.white,
+                    disabledBackgroundColor: Colors.grey[300],
                   ),
                   child: _isLoading
                       ? const SizedBox(
                           height: 20,
                           width: 20,
-                          child: CircularProgressIndicator(strokeWidth: 2),
+                          child: CircularProgressIndicator(
+                            strokeWidth: 2,
+                            valueColor: AlwaysStoppedAnimation<Color>(Colors.white),
+                          ),
                         )
-                      : const Text('ログイン'),
+                      : const Text(
+                          'ログイン',
+                          style: TextStyle(fontSize: 16),
+                        ),
                 ),
                 const SizedBox(height: 16),
 

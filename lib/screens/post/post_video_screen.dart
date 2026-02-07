@@ -17,12 +17,24 @@ class _PostVideoScreenState extends State<PostVideoScreen> {
   final _urlController = TextEditingController();
   bool _isLoading = false;
   String? _errorMessage;
+  String? _previewThumbnail;
+  String? _videoId;
 
   @override
   void dispose() {
     _titleController.dispose();
     _urlController.dispose();
     super.dispose();
+  }
+
+  /// URLからサムネイルをプレビュー
+  void _updatePreview(String url) {
+    setState(() {
+      _videoId = YouTubeService.extractVideoId(url);
+      _previewThumbnail = _videoId != null
+          ? YouTubeService.getThumbnailUrl(_videoId!)
+          : null;
+    });
   }
 
   Future<void> _handlePost() async {
@@ -41,11 +53,17 @@ class _PostVideoScreenState extends State<PostVideoScreen> {
         throw Exception('ログインしていません');
       }
 
+      // URLを正規化
+      final normalizedUrl = YouTubeService.normalizeUrl(_urlController.text.trim());
+      if (normalizedUrl == null) {
+        throw Exception('無効なYouTube URLです');
+      }
+
       final video = Video(
-        id: '', // Supabaseで自動生成される
+        id: '',
         createdAt: DateTime.now(),
         title: _titleController.text.trim(),
-        url: _urlController.text.trim(),
+        url: normalizedUrl,
         userId: currentUser.id,
       );
 
@@ -54,18 +72,23 @@ class _PostVideoScreenState extends State<PostVideoScreen> {
           .insert(video.toJson());
 
       if (mounted) {
-        // 投稿成功、前の画面に戻る
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(
             content: Text('動画を投稿しました！'),
             backgroundColor: Colors.green,
+            duration: Duration(seconds: 2),
           ),
         );
-        Navigator.of(context).pop();
+        // trueを返して、ホーム画面でリフレッシュを促す
+        Navigator.of(context).pop(true);
       }
+    } on Exception catch (e) {
+      setState(() {
+        _errorMessage = e.toString().replaceAll('Exception: ', '');
+      });
     } catch (e) {
       setState(() {
-        _errorMessage = '投稿に失敗しました: ${e.toString()}';
+        _errorMessage = '投稿に失敗しました。もう一度お試しください。';
       });
     } finally {
       if (mounted) {
@@ -81,6 +104,19 @@ class _PostVideoScreenState extends State<PostVideoScreen> {
     return Scaffold(
       appBar: AppBar(
         title: const Text('動画を投稿'),
+        actions: [
+          if (_isLoading)
+            const Center(
+              child: Padding(
+                padding: EdgeInsets.symmetric(horizontal: 16),
+                child: SizedBox(
+                  width: 20,
+                  height: 20,
+                  child: CircularProgressIndicator(strokeWidth: 2),
+                ),
+              ),
+            ),
+        ],
       ),
       body: SingleChildScrollView(
         padding: const EdgeInsets.all(24.0),
@@ -122,25 +158,6 @@ class _PostVideoScreenState extends State<PostVideoScreen> {
               ),
               const SizedBox(height: 32),
 
-              // タイトル入力
-              TextFormField(
-                controller: _titleController,
-                decoration: const InputDecoration(
-                  labelText: '動画タイトル',
-                  border: OutlineInputBorder(),
-                  prefixIcon: Icon(Icons.title),
-                  helperText: '動画の説明やメモを入力',
-                ),
-                maxLength: 100,
-                validator: (value) {
-                  if (value == null || value.trim().isEmpty) {
-                    return 'タイトルを入力してください';
-                  }
-                  return null;
-                },
-              ),
-              const SizedBox(height: 16),
-
               // YouTube URL入力
               TextFormField(
                 controller: _urlController,
@@ -151,6 +168,8 @@ class _PostVideoScreenState extends State<PostVideoScreen> {
                   helperText: '例: https://www.youtube.com/watch?v=...',
                 ),
                 keyboardType: TextInputType.url,
+                textInputAction: TextInputAction.next,
+                onChanged: _updatePreview,
                 validator: (value) {
                   if (value == null || value.trim().isEmpty) {
                     return 'URLを入力してください';
@@ -161,36 +180,141 @@ class _PostVideoScreenState extends State<PostVideoScreen> {
                   return null;
                 },
               ),
+              const SizedBox(height: 16),
+
+              // サムネイルプレビュー
+              if (_previewThumbnail != null)
+                Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    const Text(
+                      'プレビュー',
+                      style: TextStyle(
+                        fontWeight: FontWeight.bold,
+                        fontSize: 16,
+                      ),
+                    ),
+                    const SizedBox(height: 8),
+                    ClipRRect(
+                      borderRadius: BorderRadius.circular(8),
+                      child: AspectRatio(
+                        aspectRatio: 16 / 9,
+                        child: Image.network(
+                          _previewThumbnail!,
+                          fit: BoxFit.cover,
+                          loadingBuilder: (context, child, loadingProgress) {
+                            if (loadingProgress == null) return child;
+                            return Container(
+                              color: Colors.grey[300],
+                              child: const Center(
+                                child: CircularProgressIndicator(),
+                              ),
+                            );
+                          },
+                          errorBuilder: (context, error, stackTrace) {
+                            return Container(
+                              color: Colors.grey[300],
+                              child: const Icon(
+                                Icons.error,
+                                color: Colors.red,
+                                size: 48,
+                              ),
+                            );
+                          },
+                        ),
+                      ),
+                    ),
+                    const SizedBox(height: 16),
+                  ],
+                ),
+
+              // タイトル入力
+              TextFormField(
+                controller: _titleController,
+                decoration: const InputDecoration(
+                  labelText: '動画タイトル',
+                  border: OutlineInputBorder(),
+                  prefixIcon: Icon(Icons.title),
+                  helperText: '動画の説明やメモを入力',
+                ),
+                maxLength: 100,
+                textInputAction: TextInputAction.done,
+                onFieldSubmitted: (_) {
+                  if (_formKey.currentState!.validate()) {
+                    _handlePost();
+                  }
+                },
+                validator: (value) {
+                  if (value == null || value.trim().isEmpty) {
+                    return 'タイトルを入力してください';
+                  }
+                  if (value.trim().length < 3) {
+                    return 'タイトルは3文字以上で入力してください';
+                  }
+                  return null;
+                },
+              ),
               const SizedBox(height: 24),
 
               // エラーメッセージ
               if (_errorMessage != null)
                 Container(
                   padding: const EdgeInsets.all(12),
+                  margin: const EdgeInsets.only(bottom: 16),
                   decoration: BoxDecoration(
                     color: Colors.red[100],
                     borderRadius: BorderRadius.circular(8),
+                    border: Border.all(color: Colors.red[300]!),
                   ),
-                  child: Text(
-                    _errorMessage!,
-                    style: TextStyle(color: Colors.red[900]),
+                  child: Row(
+                    children: [
+                      Icon(Icons.error_outline, color: Colors.red[900]),
+                      const SizedBox(width: 12),
+                      Expanded(
+                        child: Text(
+                          _errorMessage!,
+                          style: TextStyle(color: Colors.red[900]),
+                        ),
+                      ),
+                    ],
                   ),
                 ),
-              if (_errorMessage != null) const SizedBox(height: 16),
 
               // 投稿ボタン
               ElevatedButton(
                 onPressed: _isLoading ? null : _handlePost,
                 style: ElevatedButton.styleFrom(
                   padding: const EdgeInsets.symmetric(vertical: 16),
+                  backgroundColor: Colors.blue,
+                  foregroundColor: Colors.white,
+                  disabledBackgroundColor: Colors.grey[300],
                 ),
                 child: _isLoading
                     ? const SizedBox(
                         height: 20,
                         width: 20,
-                        child: CircularProgressIndicator(strokeWidth: 2),
+                        child: CircularProgressIndicator(
+                          strokeWidth: 2,
+                          valueColor: AlwaysStoppedAnimation<Color>(Colors.white),
+                        ),
                       )
-                    : const Text('投稿する'),
+                    : const Row(
+                        mainAxisAlignment: MainAxisAlignment.center,
+                        children: [
+                          Icon(Icons.send),
+                          SizedBox(width: 8),
+                          Text('投稿する', style: TextStyle(fontSize: 16)),
+                        ],
+                      ),
+              ),
+              const SizedBox(height: 16),
+
+              // キャンセルボタン
+              TextButton(
+                onPressed: _isLoading
+                    ? null
+                    : () => Navigator.of(context).pop(),
+                child: const Text('キャンセル'),
               ),
             ],
           ),
