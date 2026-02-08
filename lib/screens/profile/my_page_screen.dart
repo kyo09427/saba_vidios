@@ -1,7 +1,10 @@
 import 'package:flutter/material.dart';
+import '../../models/user_profile.dart';
+import '../../services/profile_service.dart';
 import '../../services/supabase_service.dart';
 import '../../widgets/app_bottom_navigation_bar.dart';
 import '../auth/login_screen.dart';
+import 'edit_profile_screen.dart';
 
 /// マイページ画面
 class MyPageScreen extends StatefulWidget {
@@ -13,10 +16,12 @@ class MyPageScreen extends StatefulWidget {
 
 class _MyPageScreenState extends State<MyPageScreen> {
   final _supabase = SupabaseService.instance.client;
+  final _profileService = ProfileService.instance;
   
   // ユーザー情報
   String? _userEmail;
   DateTime? _createdAt;
+  UserProfile? _userProfile;
   
   // 統計情報（ダミーデータ）
   int _totalVideos = 0;
@@ -45,6 +50,9 @@ class _MyPageScreenState extends State<MyPageScreen> {
       final user = SupabaseService.instance.currentUser;
       
       if (user != null) {
+        // プロフィール情報を取得
+        final profile = await _profileService.getProfile(user.id);
+        
         // 投稿数を取得
         final videoCount = await _supabase
             .from('videos')
@@ -54,9 +62,8 @@ class _MyPageScreenState extends State<MyPageScreen> {
 
         setState(() {
           _userEmail = user.email;
-          _createdAt = user.createdAt != null 
-              ? DateTime.parse(user.createdAt) 
-              : null;
+          _createdAt = DateTime.parse(user.createdAt);
+          _userProfile = profile;
           _totalVideos = videoCount.count;
           // ダミーデータ
           _totalViews = _totalVideos * 120;
@@ -114,6 +121,12 @@ class _MyPageScreenState extends State<MyPageScreen> {
   }
 
   String _getInitials(String? email) {
+    // プロフィールがあればそれを使用
+    if (_userProfile != null) {
+      return _userProfile!.initials;
+    }
+    
+    // なければメールアドレスから生成
     if (email == null || email.isEmpty) return '?';
     return email[0].toUpperCase();
   }
@@ -251,23 +264,38 @@ class _MyPageScreenState extends State<MyPageScreen> {
                         CircleAvatar(
                           radius: 50,
                           backgroundColor: Colors.blue,
-                          child: Text(
-                            _getInitials(_userEmail),
-                            style: const TextStyle(
-                              fontSize: 40,
-                              fontWeight: FontWeight.bold,
-                              color: Colors.white,
-                            ),
-                          ),
+                          backgroundImage: _userProfile?.avatarUrl != null
+                              ? NetworkImage(_userProfile!.avatarUrl!)
+                              : null,
+                          child: _userProfile?.avatarUrl == null
+                              ? Text(
+                                  _getInitials(_userEmail),
+                                  style: const TextStyle(
+                                    fontSize: 40,
+                                    fontWeight: FontWeight.bold,
+                                    color: Colors.white,
+                                  ),
+                                )
+                              : null,
                         ),
                         const SizedBox(height: 16),
                         
-                        // メールアドレス
+                        // ユーザー名（プロフィールから取得）
                         Text(
-                          _userEmail ?? '未設定',
+                          _userProfile?.username ?? _userEmail ?? '未設定',
                           style: const TextStyle(
                             fontSize: 18,
                             fontWeight: FontWeight.bold,
+                          ),
+                        ),
+                        const SizedBox(height: 4),
+                        
+                        // メールアドレス
+                        Text(
+                          _userEmail ?? '',
+                          style: TextStyle(
+                            fontSize: 14,
+                            color: Colors.grey[600],
                           ),
                         ),
                         const SizedBox(height: 4),
@@ -284,12 +312,29 @@ class _MyPageScreenState extends State<MyPageScreen> {
                         
                         // プロフィール編集ボタン
                         OutlinedButton.icon(
-                          onPressed: () {
-                            ScaffoldMessenger.of(context).showSnackBar(
-                              const SnackBar(
-                                content: Text('プロフィール編集機能は準備中です'),
+                          onPressed: () async {
+                            if (_userProfile == null) {
+                              ScaffoldMessenger.of(context).showSnackBar(
+                                const SnackBar(
+                                  content: Text('プロフィール情報の読み込み中です'),
+                                  backgroundColor: Colors.orange,
+                                ),
+                              );
+                              return;
+                            }
+                            
+                            final result = await Navigator.of(context).push(
+                              MaterialPageRoute(
+                                builder: (_) => EditProfileScreen(
+                                  profile: _userProfile!,
+                                ),
                               ),
                             );
+                            
+                            // プロフィール編集から戻ってきたら再読み込み
+                            if (result == true && mounted) {
+                              _loadUserData();
+                            }
                           },
                           icon: const Icon(Icons.edit),
                           label: const Text('プロフィール編集'),

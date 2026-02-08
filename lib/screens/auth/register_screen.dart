@@ -1,3 +1,4 @@
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import '../../services/supabase_service.dart';
 import 'email_verification_screen.dart';
@@ -80,16 +81,25 @@ class _RegisterScreenState extends State<RegisterScreen> {
         );
       }
     } catch (e) {
+      // デバッグ用: コンソールに完全なエラーを出力
+      debugPrint('❌ Registration error: $e');
+      
       String errorMessage = '登録に失敗しました';
       
       final errorString = e.toString().toLowerCase();
       if (errorString.contains('user already registered') ||
-          errorString.contains('email address already in use')) {
+          errorString.contains('email address already in use') ||
+          errorString.contains('already exists')) {
         errorMessage = 'このメールアドレスは既に登録されています';
       } else if (errorString.contains('password')) {
         errorMessage = 'パスワードが要件を満たしていません';
       } else if (errorString.contains('network')) {
         errorMessage = 'ネットワークエラーが発生しました。\n接続を確認してください。';
+      } else if (errorString.contains('trigger') || errorString.contains('function')) {
+        errorMessage = 'データベースのセットアップが完了していません。\n管理者に問い合わせてください。';
+      } else {
+        // その他のエラーは詳細を表示
+        errorMessage = '登録に失敗しました\n\n詳細: ${e.toString()}';
       }
       
       setState(() {

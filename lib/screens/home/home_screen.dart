@@ -58,11 +58,11 @@ class _HomeScreenState extends State<HomeScreen> {
     try {
       final response = await _supabase
           .from('videos')
-          .select()
+          .select('*, profiles(*)')  // プロフィール情報もJOINで取得
           .order('created_at', ascending: false);
 
       final videos = (response as List)
-          .map((json) => Video.fromJson(json as Map<String, dynamic>))
+          .map((json) => Video.fromJsonWithProfile(json as Map<String, dynamic>))
           .where((video) => video.id.isNotEmpty) // 無効なデータを除外
           .toList();
 
@@ -413,10 +413,19 @@ class _HomeScreenState extends State<HomeScreen> {
             child: Row(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                const CircleAvatar(
+                // ユーザーアバター（実際のプロフィール情報を使用）
+                CircleAvatar(
                   radius: 18,
                   backgroundColor: Colors.purple,
-                  child: Text('サ', style: TextStyle(color: Colors.white)),
+                  backgroundImage: video.userProfile?.avatarUrl != null
+                      ? NetworkImage(video.userProfile!.avatarUrl!)
+                      : null,
+                  child: video.userProfile?.avatarUrl == null
+                      ? Text(
+                          video.userProfile?.initials ?? '?',
+                          style: const TextStyle(color: Colors.white, fontSize: 14),
+                        )
+                      : null,
                 ),
                 const SizedBox(width: 12),
                 Expanded(
@@ -436,7 +445,7 @@ class _HomeScreenState extends State<HomeScreen> {
                       ),
                       const SizedBox(height: 4),
                       Text(
-                        'サバ公式 • 1.2万回視聴 • ${video.relativeTime}',
+                        '${video.userProfile?.username ?? "不明"} • ${video.relativeTime}',
                         style: TextStyle(color: _textGray, fontSize: 12),
                         maxLines: 2,
                         overflow: TextOverflow.ellipsis,
