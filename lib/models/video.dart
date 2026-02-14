@@ -23,6 +23,12 @@ class Video {
   /// 投稿者のユーザーID
   final String userId;
 
+  /// メインカテゴリ（雑談/ゲーム/音楽/ネタ）
+  final String mainCategory;
+
+  /// サブカテゴリタグのリスト
+  final List<String> tags;
+
   /// 投稿者のプロフィール情報（JOIN時のみ取得）
   final UserProfile? userProfile;
 
@@ -32,6 +38,8 @@ class Video {
     required this.title,
     required this.url,
     required this.userId,
+    required this.mainCategory,
+    this.tags = const [],
     this.userProfile,
   });
 
@@ -44,12 +52,25 @@ class Video {
   /// Returns: Videoオブジェクト
   factory Video.fromJson(Map<String, dynamic> json) {
     try {
+      // タグの解析
+      List<String> tagsList = [];
+      if (json['tags'] != null) {
+        if (json['tags'] is List) {
+          tagsList = (json['tags'] as List)
+              .map((e) => e.toString())
+              .where((e) => e.isNotEmpty)
+              .toList();
+        }
+      }
+
       return Video(
         id: _extractString(json, 'id', ''),
         createdAt: _extractDateTime(json, 'created_at'),
         title: _extractString(json, 'title', '無題の動画'),
         url: _extractString(json, 'url', ''),
         userId: _extractString(json, 'user_id', ''),
+        mainCategory: _extractString(json, 'main_category', '雑談'),
+        tags: tagsList,
       );
     } catch (e) {
       if (kDebugMode) {
@@ -64,6 +85,8 @@ class Video {
         title: '読み込みエラー',
         url: '',
         userId: '',
+        mainCategory: '雑談',
+        tags: const [],
       );
     }
   }
@@ -78,12 +101,25 @@ class Video {
         profile = UserProfile.fromJson(json['profiles'] as Map<String, dynamic>);
       }
 
+      // タグの解析
+      List<String> tagsList = [];
+      if (json['tags'] != null) {
+        if (json['tags'] is List) {
+          tagsList = (json['tags'] as List)
+              .map((e) => e.toString())
+              .where((e) => e.isNotEmpty)
+              .toList();
+        }
+      }
+
       return Video(
         id: _extractString(json, 'id', ''),
         createdAt: _extractDateTime(json, 'created_at'),
         title: _extractString(json, 'title', '無題の動画'),
         url: _extractString(json, 'url', ''),
         userId: _extractString(json, 'user_id', ''),
+        mainCategory: _extractString(json, 'main_category', '雑談'),
+        tags: tagsList,
         userProfile: profile,
       );
     } catch (e) {
@@ -98,6 +134,8 @@ class Video {
         title: '読み込みエラー',
         url: '',
         userId: '',
+        mainCategory: '雑談',
+        tags: const [],
       );
     }
   }
@@ -177,6 +215,7 @@ class Video {
   /// SupabaseへinsertするためのJSONデータに変換
   /// 
   /// idとcreated_atは自動生成されるため含めません。
+  /// tagsは別途video_tagsテーブルに保存されます。
   /// 
   /// Returns: insert用のマップ
   Map<String, dynamic> toJson() {
@@ -184,6 +223,7 @@ class Video {
       'title': title,
       'url': url,
       'user_id': userId,
+      'main_category': mainCategory,
     };
   }
 
@@ -361,6 +401,8 @@ class Video {
     String? title,
     String? url,
     String? userId,
+    String? mainCategory,
+    List<String>? tags,
     UserProfile? userProfile,
   }) {
     return Video(
@@ -369,6 +411,8 @@ class Video {
       title: title ?? this.title,
       url: url ?? this.url,
       userId: userId ?? this.userId,
+      mainCategory: mainCategory ?? this.mainCategory,
+      tags: tags ?? this.tags,
       userProfile: userProfile ?? this.userProfile,
     );
   }

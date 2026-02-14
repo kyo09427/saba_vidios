@@ -83,10 +83,26 @@ class ProfileService {
       // 2. アスペクト比を維持しながら最大512x512pxにリサイズ
       const maxSize = 512;
       if (image.width > maxSize || image.height > maxSize) {
+        // リサイズ後のサイズを計算
+        int targetWidth;
+        int targetHeight;
+        
+        if (image.width > image.height) {
+          targetWidth = maxSize;
+          targetHeight = (maxSize * image.height / image.width).round();
+        } else {
+          targetHeight = maxSize;
+          targetWidth = (maxSize * image.width / image.height).round();
+        }
+        
+        // サイズが1以上であることを保証
+        targetWidth = targetWidth > 0 ? targetWidth : 1;
+        targetHeight = targetHeight > 0 ? targetHeight : 1;
+        
         image = img.copyResize(
           image,
-          width: image.width > image.height ? maxSize : null,
-          height: image.height > image.width ? maxSize : null,
+          width: targetWidth,
+          height: targetHeight,
           interpolation: img.Interpolation.average,
         );
       }
@@ -101,14 +117,27 @@ class ProfileService {
       final fileName = '$userId/${userId}_$timestamp.jpg';
 
       // 5. Supabase Storageにアップロード
-      await _supabase.storage.from('avatars').uploadBinary(
-            fileName,
-            compressedData,
-            fileOptions: const FileOptions(
-              contentType: 'image/jpeg',
-              upsert: true, // 同名ファイルがあれば上書き
-            ),
+      try {
+        await _supabase.storage.from('avatars').uploadBinary(
+              fileName,
+              compressedData,
+              fileOptions: const FileOptions(
+                contentType: 'image/jpeg',
+                upsert: true, // 同名ファイルがあれば上書き
+              ),
+            );
+      } on StorageException catch (e) {
+        if (e.statusCode == '404') {
+          throw Exception(
+            'Supabaseの「avatars」バケットが存在しません。\n'
+            'Supabaseダッシュボードで以下の手順を実行してください：\n'
+            '1. Storage > Create a new bucketをクリック\n'
+            '2. バケット名: avatars\n'
+            '3. Public bucket: はい（チェックを入れる）'
           );
+        }
+        rethrow;
+      }
 
       // 6. 公開URLを取得
       final publicUrl = _supabase.storage.from('avatars').getPublicUrl(fileName);

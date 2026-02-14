@@ -17,9 +17,20 @@ class HomeScreen extends StatefulWidget {
 class _HomeScreenState extends State<HomeScreen> {
   final _supabase = SupabaseService.instance.client;
   List<Video> _videos = [];
+  List<Video> _filteredVideos = [];
   bool _isLoading = true;
   String? _errorMessage;
   RealtimeChannel? _realtimeChannel;
+  String _selectedFilter = 'すべて';
+  final List<String> _filterCategories = [
+    'すべて',
+    '新しい動画',
+    '雑談',
+    'ゲーム',
+    '音楽',
+    'ネタ',
+    'その他',
+  ];
 
   // デザイン用カラー定義
   final Color _ytBackground = const Color(0xFF0F0F0F);
@@ -56,23 +67,85 @@ class _HomeScreenState extends State<HomeScreen> {
     });
 
     try {
+      // 動画データを取得
       final response = await _supabase
           .from('videos')
-          .select('*, profiles(*)')  // プロフィール情報もJOINで取得
+          .select('*')
           .order('created_at', ascending: false);
 
-      final videos = (response as List)
-          .map((json) => Video.fromJsonWithProfile(json as Map<String, dynamic>))
-          .where((video) => video.id.isNotEmpty) // 無効なデータを除外
+      final videosData = response as List<dynamic>;
+      
+      // 各動画のユーザーIDを収集（重複を除く）
+      final userIds = videosData
+          .map((v) => v['user_id'] as String?)
+          .where((id) => id != null && id.isNotEmpty)
+          .toSet()
           .toList();
+
+      // プロフィール情報を一括取得
+      Map<String, dynamic> profilesMap = {};
+      if (userIds.isNotEmpty) {
+        final profilesResponse = await _supabase
+            .from('profiles')
+            .select('*')
+            .inFilter('id', userIds);
+
+        for (final profile in (profilesResponse as List)) {
+          profilesMap[profile['id'] as String] = profile;
+        }
+      }
+
+      // 各動画のタグ情報を取得
+      Map<String, List<String>> videoTagsMap = {};
+      if (videosData.isNotEmpty) {
+        final videoIds = videosData.map((v) => v['id'] as String).toList();
+        
+        // video_tagsテーブルとtagsテーブルをJOINして取得
+        final tagsResponse = await _supabase
+            .from('video_tags')
+            .select('video_id, tags!inner(name)')
+            .inFilter('video_id', videoIds);
+
+        for (final item in (tagsResponse as List)) {
+          final videoId = item['video_id'] as String;
+          final tagName = item['tags']['name'] as String;
+          
+          if (!videoTagsMap.containsKey(videoId)) {
+            videoTagsMap[videoId] = [];
+          }
+          videoTagsMap[videoId]!.add(tagName);
+        }
+      }
+
+      // 動画データとプロフィール情報、タグ情報を結合
+      final videos = videosData.map((videoJson) {
+        final userId = videoJson['user_id'] as String?;
+        if (userId != null && profilesMap.containsKey(userId)) {
+          videoJson['profiles'] = profilesMap[userId];
+        }
+        
+        // タグ情報を追加
+        final videoId = videoJson['id'] as String;
+        if (videoTagsMap.containsKey(videoId)) {
+          videoJson['tags'] = videoTagsMap[videoId];
+        } else {
+          videoJson['tags'] = [];
+        }
+        
+        return Video.fromJsonWithProfile(videoJson as Map<String, dynamic>);
+      })
+      .where((video) => video.id.isNotEmpty) // 無効なデータを除外
+      .toList();
 
       if (mounted) {
         setState(() {
           _videos = videos;
+          _applyFilter();
           _isLoading = false;
         });
       }
     } catch (e) {
+      print('❌ Error loading videos: $e'); // デバッグ用
       if (mounted) {
         setState(() {
           _errorMessage = '動画の読み込みに失敗しました';
@@ -339,7 +412,37 @@ class _HomeScreenState extends State<HomeScreen> {
     );
   }
 
-  /// 動画カード
+  /// フィルターを適用
+  void _applyFilter() {
+    if (_selectedFilter == 'すべて') {
+      _filteredVideos = _videos;
+    } else if (_selectedFilter == '新しい動画') {
+      // 24時間以内の動画
+      final yesterday = DateTime.now().subtract(const Duration(hours: 24));
+      _filteredVideos = _videos.where((v) => v.createdAt.isAfter(yesterday)).toList();
+    } else {
+      // カテゴリでフィルター
+      _filteredVideos = _videos.where((v) => v.mainCategory == _selectedFilter).toList();
+    }
+  }
+
+  /// カテゴリに応じた色を返す
+  Color _getCategoryColor(String category) {
+    switch (category) {
+      case 'ゲーム':
+        return const Color(0xFF9C27B0); // 紫
+      case '音楽':
+        return const Color(0xFFE91E63); // ピンク
+      case 'ネタ':
+        return const Color(0xFFFF9800); // オレンジ
+      case 'その他':
+        return const Color(0xFF607D8B); // グレー
+      case '雑談':
+      default:
+        return const Color(0xFF2196F3); // 青
+    }
+  }
+
   Widget _buildVideoCard(Video video) {
     return InkWell(
       onTap: () => _handleVideoTap(video),
@@ -447,8 +550,64 @@ class _HomeScreenState extends State<HomeScreen> {
                       Text(
                         '${video.userProfile?.username ?? "不明"} • ${video.relativeTime}',
                         style: TextStyle(color: _textGray, fontSize: 12),
-                        maxLines: 2,
+                        maxLines: 1,
                         overflow: TextOverflow.ellipsis,
+                      ),
+                      const SizedBox(height: 6),
+                      // カテゴリとタグ
+                      Wrap(
+                        spacing: 6,
+                        runSpacing: 4,
+                        children: [
+                          // メインカテゴリバッジ
+                          Container(
+                            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                            decoration: BoxDecoration(
+                              color: _getCategoryColor(video.mainCategory),
+                              borderRadius: BorderRadius.circular(4),
+                            ),
+                            child: Text(
+                              video.mainCategory,
+                              style: const TextStyle(
+                                color: Colors.white,
+                                fontSize: 11,
+                                fontWeight: FontWeight.w600,
+                              ),
+                            ),
+                          ),
+                          // サブカテゴリタグ（最大3つまで表示）
+                          ...video.tags.take(3).map((tag) => Container(
+                            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                            decoration: BoxDecoration(
+                              color: _ytSurface,
+                              borderRadius: BorderRadius.circular(4),
+                              border: Border.all(color: Colors.grey.shade700, width: 1),
+                            ),
+                            child: Text(
+                              tag,
+                              style: TextStyle(
+                                color: _textGray,
+                                fontSize: 11,
+                              ),
+                            ),
+                          )),
+                          // 残りのタグ数を表示
+                          if (video.tags.length > 3)
+                            Container(
+                              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                              decoration: BoxDecoration(
+                                color: _ytSurface,
+                                borderRadius: BorderRadius.circular(4),
+                              ),
+                              child: Text(
+                                '+${video.tags.length - 3}',
+                                style: TextStyle(
+                                  color: _textGray,
+                                  fontSize: 11,
+                                ),
+                              ),
+                            ),
+                        ],
                       ),
                     ],
                   ),
@@ -493,6 +652,25 @@ class _HomeScreenState extends State<HomeScreen> {
 
   @override
   Widget build(BuildContext context) {
+    // 画面幅に応じた列数を計算
+    final screenWidth = MediaQuery.of(context).size.width;
+    int crossAxisCount;
+    double childAspectRatio;
+    
+    if (screenWidth < 600) {
+      crossAxisCount = 1;
+      childAspectRatio = 1.0; // 1列の場合は正方形に近い比率
+    } else if (screenWidth < 900) {
+      crossAxisCount = 2;
+      childAspectRatio = 0.85;
+    } else if (screenWidth < 1200) {
+      crossAxisCount = 3;
+      childAspectRatio = 0.8;
+    } else {
+      crossAxisCount = 4;
+      childAspectRatio = 0.75;
+    }
+
     return Scaffold(
       backgroundColor: _ytBackground,
       body: SafeArea(
@@ -596,7 +774,7 @@ class _HomeScreenState extends State<HomeScreen> {
                         _buildCategoryPills(),
 
                         // コンテンツ
-                        if (_videos.isEmpty)
+                        if (_filteredVideos.isEmpty)
                           SliverFillRemaining(
                             child: Center(
                               child: Column(
@@ -622,25 +800,27 @@ class _HomeScreenState extends State<HomeScreen> {
                             ),
                           )
                         else ...[
-                          // 1つ目の動画
-                          if (_videos.isNotEmpty)
-                            SliverToBoxAdapter(
-                              child: _buildVideoCard(_videos.first),
+                          // 動画グリッド
+                          SliverPadding(
+                            padding: EdgeInsets.symmetric(
+                              horizontal: crossAxisCount == 1 ? 0 : 12,
+                              vertical: 12,
                             ),
-
-                          // ショート動画セクション
-                          _buildShortsSection(),
-
-                          // 2つ目以降の動画
-                          if (_videos.length > 1)
-                            SliverList(
+                            sliver: SliverGrid(
+                              gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
+                                crossAxisCount: crossAxisCount,
+                                childAspectRatio: childAspectRatio,
+                                crossAxisSpacing: 12,
+                                mainAxisSpacing: 12,
+                              ),
                               delegate: SliverChildBuilderDelegate(
                                 (context, index) {
-                                  return _buildVideoCard(_videos[index + 1]);
+                                  return _buildVideoCard(_filteredVideos[index]);
                                 },
-                                childCount: _videos.length - 1,
+                                childCount: _filteredVideos.length,
                               ),
                             ),
+                          ),
                           
                           const SliverToBoxAdapter(child: SizedBox(height: 80)),
                         ],

@@ -15,16 +15,49 @@ class _PostVideoScreenState extends State<PostVideoScreen> {
   final _formKey = GlobalKey<FormState>();
   final _titleController = TextEditingController();
   final _urlController = TextEditingController();
+  final _tagInputController = TextEditingController();
   bool _isLoading = false;
   String? _errorMessage;
   String? _previewThumbnail;
   String? _videoId;
+  
+  // カテゴリとタグの状態
+  String _selectedCategory = '雑談';
+  final List<String> _categories = ['雑談', 'ゲーム', '音楽', 'ネタ', 'その他'];
+  List<String> _tags = [];
 
   @override
   void dispose() {
     _titleController.dispose();
     _urlController.dispose();
+    _tagInputController.dispose();
     super.dispose();
+  }
+
+  /// タグを追加
+  void _addTag(String tag) {
+    final trimmedTag = tag.trim();
+    if (trimmedTag.isEmpty) return;
+    if (_tags.contains(trimmedTag)) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('このタグは既に追加されています'),
+          duration: Duration(seconds: 1),
+        ),
+      );
+      return;
+    }
+    setState(() {
+      _tags.add(trimmedTag);
+      _tagInputController.clear();
+    });
+  }
+
+  /// タグを削除
+  void _removeTag(String tag) {
+    setState(() {
+      _tags.remove(tag);
+    });
   }
 
   /// URLからサムネイルをプレビュー
@@ -65,11 +98,51 @@ class _PostVideoScreenState extends State<PostVideoScreen> {
         title: _titleController.text.trim(),
         url: normalizedUrl,
         userId: currentUser.id,
+        mainCategory: _selectedCategory,
+        tags: _tags,
       );
 
-      await SupabaseService.instance.client
+      // 動画を挿入して、挿入されたデータを取得
+      final insertedData = await SupabaseService.instance.client
           .from('videos')
-          .insert(video.toJson());
+          .insert(video.toJson())
+          .select()
+          .single();
+      
+      final videoId = insertedData['id'] as String;
+
+      // タグの処理
+      if (_tags.isNotEmpty) {
+        for (final tagName in _tags) {
+          // タグが存在するか確認
+          final existingTag = await SupabaseService.instance.client
+              .from('tags')
+              .select('id')
+              .eq('name', tagName)
+              .maybeSingle();
+
+          String tagId;
+          if (existingTag != null) {
+            tagId = existingTag['id'] as String;
+          } else {
+            // 新しいタグを作成
+            final newTag = await SupabaseService.instance.client
+                .from('tags')
+                .insert({'name': tagName})
+                .select('id')
+                .single();
+            tagId = newTag['id'] as String;
+          }
+
+          // video_tagsテーブルに関連付けを追加
+          await SupabaseService.instance.client
+              .from('video_tags')
+              .insert({
+            'video_id': videoId,
+            'tag_id': tagId,
+          });
+        }
+      }
 
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
@@ -88,7 +161,7 @@ class _PostVideoScreenState extends State<PostVideoScreen> {
       });
     } catch (e) {
       setState(() {
-        _errorMessage = '投稿に失敗しました。もう一度お試しください。';
+        _errorMessage = '投稿に失敗しました。もう一度お試しください。\n$e';
       });
     } finally {
       if (mounted) {
@@ -254,6 +327,66 @@ class _PostVideoScreenState extends State<PostVideoScreen> {
                   return null;
                 },
               ),
+              const SizedBox(height: 24),
+
+              // メインカテゴリ選択
+              DropdownButtonFormField<String>(
+                value: _selectedCategory,
+                decoration: const InputDecoration(
+                  labelText: 'メインカテゴリ',
+                  border: OutlineInputBorder(),
+                  prefixIcon: Icon(Icons.category),
+                  helperText: 'カテゴリを選択（必須）',
+                ),
+                items: _categories.map((category) {
+                  return DropdownMenuItem(
+                    value: category,
+                    child: Text(category),
+                  );
+                }).toList(),
+                onChanged: (value) {
+                  if (value != null) {
+                    setState(() {
+                      _selectedCategory = value;
+                    });
+                  }
+                },
+              ),
+              const SizedBox(height: 24),
+
+              // サブカテゴリタグ入力
+              TextFormField(
+                controller: _tagInputController,
+                decoration: InputDecoration(
+                  labelText: 'タグ',
+                  border: const OutlineInputBorder(),
+                  prefixIcon: const Icon(Icons.tag),
+                  helperText: '複数入力可能（Enterで追加）',
+                  suffixIcon: IconButton(
+                    icon: const Icon(Icons.add),
+                    onPressed: () {
+                      _addTag(_tagInputController.text);
+                    },
+                  ),
+                ),
+                textInputAction: TextInputAction.done,
+                onFieldSubmitted: _addTag,
+              ),
+              const SizedBox(height: 8),
+
+              // タグのチップ表示
+              if (_tags.isNotEmpty)
+                Wrap(
+                  spacing: 8,
+                  runSpacing: 8,
+                  children: _tags.map((tag) {
+                    return Chip(
+                      label: Text(tag),
+                      onDeleted: () => _removeTag(tag),
+                      deleteIcon: const Icon(Icons.close, size: 18),
+                    );
+                  }).toList(),
+                ),
               const SizedBox(height: 24),
 
               // エラーメッセージ
