@@ -1,0 +1,782 @@
+import 'package:flutter/material.dart';
+import '../../models/user_profile.dart';
+import '../../models/video.dart';
+import '../../services/supabase_service.dart';
+import '../../services/youtube_service.dart';
+import '../../widgets/app_bottom_navigation_bar.dart';
+import '../channel/channel_screen.dart';
+
+/// 登録チャンネル画面
+/// 
+/// 登録しているチャンネルの動画のみを表示します。
+class SubscriptionsScreen extends StatefulWidget {
+  const SubscriptionsScreen({super.key});
+
+  @override
+  State<SubscriptionsScreen> createState() => _SubscriptionsScreenState();
+}
+
+class _SubscriptionsScreenState extends State<SubscriptionsScreen> {
+  final _supabase = SupabaseService.instance.client;
+  List<Video> _videos = [];
+  List<Video> _filteredVideos = []; // フィルター後の動画リスト
+  List<UserProfile> _subscribedChannels = [];
+  String? _selectedChannelId; // nullの場合は「すべて」
+  String _selectedCategoryFilter = 'すべて'; // カテゴリフィルター
+  bool _isLoading = true;
+  String? _errorMessage;
+
+  // カテゴリフィルター用
+  final List<String> _filterCategories = [
+    'すべて',
+    '新しい動画',
+    '雑談',
+    'ゲーム',
+    '音楽',
+    'ネタ',
+    'その他',
+  ];
+
+  // デザイン用カラー定義
+  final Color _ytBackground = const Color(0xFF0F0F0F);
+  final Color _ytSurface = const Color(0xFF272727);
+  final Color _ytRed = const Color(0xFFF20D0D);
+  final Color _textWhite = Colors.white;
+  final Color _textGray = const Color(0xFFAAAAAA);
+
+  @override
+  void initState() {
+    super.initState();
+    _loadSubscribedChannels();
+  }
+
+  /// 登録チャンネル一覧を読み込む
+  Future<void> _loadSubscribedChannels() async {
+    if (!mounted) return;
+    
+    setState(() {
+      _isLoading = true;
+      _errorMessage = null;
+    });
+
+    try {
+      // 登録しているチャンネルのIDリストを取得
+      final channelIds = await SupabaseService.instance.getSubscribedChannelIds();
+
+      if (channelIds.isEmpty) {
+        if (mounted) {
+          setState(() {
+            _subscribedChannels = [];
+            _videos = [];
+            _isLoading = false;
+          });
+        }
+        return;
+      }
+
+      // プロフィール情報を取得
+      final profilesResponse = await _supabase
+          .from('profiles')
+          .select('*')
+          .inFilter('id', channelIds);
+
+      final channels = (profilesResponse as List)
+          .map((p) => UserProfile.fromJson(p as Map<String, dynamic>))
+          .toList();
+
+      if (mounted) {
+        setState(() {
+          _subscribedChannels = channels;
+        });
+      }
+
+      // 動画を読み込む
+      await _loadVideos();
+    } catch (e) {
+      debugPrint('❌ Error loading subscribed channels: $e');
+      if (mounted) {
+        setState(() {
+          _errorMessage = 'チャンネル情報の読み込みに失敗しました';
+          _isLoading = false;
+        });
+      }
+    }
+  }
+
+  /// 動画を読み込む
+  Future<void> _loadVideos() async {
+    try {
+      final channelIds = _subscribedChannels.map((c) => c.id).toList();
+      
+      if (channelIds.isEmpty) {
+        if (mounted) {
+          setState(() {
+            _videos = [];
+            _isLoading = false;
+          });
+        }
+        return;
+      }
+
+      // フィルター条件を設定
+      List<String> targetChannelIds;
+      if (_selectedChannelId != null) {
+        targetChannelIds = [_selectedChannelId!];
+      } else {
+        targetChannelIds = channelIds;
+      }
+
+      // 登録チャンネルの動画を取得
+      final videosResponse = await _supabase
+          .from('videos')
+          .select('*')
+          .inFilter('user_id', targetChannelIds)
+          .order('created_at', ascending: false);
+
+      final videosData = videosResponse as List<dynamic>;
+      
+      // 各動画のユーザーIDを収集（重複を除く）
+      final userIds = videosData
+          .map((v) => v['user_id'] as String?)
+          .where((id) => id != null && id.isNotEmpty)
+          .toSet()
+          .toList();
+
+      // プロフィール情報を一括取得
+      Map<String, dynamic> profilesMap = {};
+      if (userIds.isNotEmpty) {
+        final profilesResponse = await _supabase
+            .from('profiles')
+            .select('*')
+            .inFilter('id', userIds);
+
+        for (final profile in (profilesResponse as List)) {
+          profilesMap[profile['id'] as String] = profile;
+        }
+      }
+
+      // 動画データとプロフィール情報を結合
+      final videos = videosData.map((videoJson) {
+        final userId = videoJson['user_id'] as String?;
+        if (userId != null && profilesMap.containsKey(userId)) {
+          videoJson['profiles'] = profilesMap[userId];
+        }
+        
+        return Video.fromJsonWithProfile(videoJson as Map<String, dynamic>);
+      })
+      .where((video) => video.id.isNotEmpty)
+      .toList();
+
+      if (mounted) {
+        setState(() {
+          _videos = videos;
+          _applyFilter(); // フィルターを適用
+          _isLoading = false;
+        });
+      }
+    } catch (e) {
+      debugPrint('❌ Error loading subscribed videos: $e');
+      if (mounted) {
+        setState(() {
+          _errorMessage = '動画の読み込みに失敗しました';
+          _isLoading = false;
+        });
+      }
+    }
+  }
+
+  /// チャンネルを選択
+  void _selectChannel(String? channelId) {
+    if (_selectedChannelId == channelId) return;
+    
+    setState(() {
+      _selectedChannelId = channelId;
+      _isLoading = true;
+    });
+    
+    _loadVideos();
+  }
+
+  /// 動画をタップしたときの処理
+  Future<void> _handleVideoTap(Video video) async {
+    if (video.url.isEmpty) {
+      _showErrorSnackBar('無効な動画URLです');
+      return;
+    }
+
+    final success = await YouTubeService.launchVideo(video.url);
+    
+    if (!success && mounted) {
+      _showErrorSnackBar('動画を開けませんでした');
+    }
+  }
+
+  void _showErrorSnackBar(String message) {
+    if (!mounted) return;
+    
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(message),
+        backgroundColor: Colors.red,
+        duration: const Duration(seconds: 3),
+      ),
+    );
+  }
+
+  /// フィルターを適用
+  void _applyFilter() {
+    if (_selectedCategoryFilter == 'すべて') {
+      _filteredVideos = List.from(_videos);
+    } else if (_selectedCategoryFilter == '新しい動画') {
+      // 最新の動画（24時間以内）
+      final now = DateTime.now();
+      _filteredVideos = _videos.where((video) {
+        final diff = now.difference(video.createdAt);
+        return diff.inHours <= 24;
+      }).toList();
+    } else {
+      // カテゴリでフィルタリング
+      _filteredVideos = _videos.where((video) {
+        return video.mainCategory == _selectedCategoryFilter;
+      }).toList();
+    }
+  }
+
+  /// カテゴリフィルターチップを構築
+  Widget _buildCategoryPills() {
+    return SliverToBoxAdapter(
+      child: Container(
+        height: 48,
+        color: _ytBackground.withValues(alpha: 0.95),
+        child: ListView.separated(
+          scrollDirection: Axis.horizontal,
+          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+          itemCount: _filterCategories.length,
+          separatorBuilder: (context, index) => const SizedBox(width: 8),
+          itemBuilder: (context, index) {
+            final category = _filterCategories[index];
+            final isSelected = _selectedCategoryFilter == category;
+            
+            return GestureDetector(
+              onTap: () {
+                setState(() {
+                  _selectedCategoryFilter = category;
+                  _applyFilter();
+                });
+              },
+              child: Container(
+                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                decoration: BoxDecoration(
+                  color: isSelected ? _textWhite : _ytSurface,
+                  borderRadius: BorderRadius.circular(8),
+                ),
+                child: Center(
+                  child: Text(
+                    category,
+                    style: TextStyle(
+                      color: isSelected ? Colors.black : _textWhite,
+                      fontWeight: FontWeight.w500,
+                      fontSize: 14,
+                    ),
+                  ),
+                ),
+              ),
+            );
+          },
+        ),
+      ),
+    );
+  }
+
+  /// グリッドの列数を決定
+  int _getGridColumnCount(double screenWidth, bool isWideScreen) {
+    if (!isWideScreen) {
+      // スマホサイズ：1列
+      return 1;
+    }
+    
+    // PC表示：画面幅に応じて列数を調整
+    if (screenWidth > 1600) {
+      return 4; // 超ワイド画面
+    } else if (screenWidth > 1200) {
+      return 3; // ワイド画面
+    } else {
+      return 2; // 中程度の画面
+    }
+  }
+
+  /// 動画カードをホーム画面と同じスタイルで構築
+  Widget _buildVideoCard(Video video) {
+    return InkWell(
+      onTap: () => _handleVideoTap(video),
+      child: Column(
+        children: [
+          // サムネイル
+          Stack(
+            children: [
+              AspectRatio(
+                aspectRatio: 16 / 9,
+                child: video.thumbnailUrl != null && video.thumbnailUrl!.isNotEmpty
+                    ? Image.network(
+                        video.thumbnailUrl!,
+                        fit: BoxFit.cover,
+                        loadingBuilder: (context, child, loadingProgress) {
+                          if (loadingProgress == null) return child;
+                          return Container(
+                            color: _ytSurface,
+                            child: Center(
+                              child: CircularProgressIndicator(
+                                value: loadingProgress.expectedTotalBytes != null
+                                    ? loadingProgress.cumulativeBytesLoaded /
+                                        loadingProgress.expectedTotalBytes!
+                                    : null,
+                                color: _ytRed,
+                              ),
+                            ),
+                          );
+                        },
+                        errorBuilder: (context, error, stackTrace) =>
+                            Container(
+                              color: _ytSurface,
+                              child: Center(
+                                child: Icon(Icons.play_circle_outline,
+                                    color: _textGray, size: 48),
+                              ),
+                            ),
+                      )
+                    : Container(
+                        color: _ytSurface,
+                        child: Center(
+                          child: Icon(Icons.video_library_outlined,
+                              color: _textGray, size: 48),
+                        ),
+                      ),
+              ),
+              // 時間表示バッジ (ダミー)
+              Positioned(
+                bottom: 8,
+                right: 8,
+                child: Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 2),
+                  decoration: BoxDecoration(
+                    color: Colors.black.withValues(alpha: 0.8),
+                    borderRadius: BorderRadius.circular(4),
+                  ),
+                  child: const Text(
+                    '12:45',
+                    style: TextStyle(
+                        color: Colors.white,
+                        fontSize: 12,
+                        fontWeight: FontWeight.w500),
+                  ),
+                ),
+              ),
+            ],
+          ),
+          // 動画詳細情報（グリッド用に簡略化）
+          Padding(
+            padding: const EdgeInsets.all(8),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                // タイトル
+                Text(
+                  video.title,
+                  maxLines: 2,
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(
+                    color: _textWhite,
+                    fontSize: 14,
+                    fontWeight: FontWeight.w500,
+                    height: 1.2,
+                  ),
+                ),
+                const SizedBox(height: 8),
+                // チャンネル情報
+                Row(
+                  children: [
+                    GestureDetector(
+                      onTap: () {
+                        Navigator.of(context).push(
+                          MaterialPageRoute(
+                            builder: (_) => ChannelScreen(channelId: video.userId),
+                          ),
+                        );
+                      },
+                      child: CircleAvatar(
+                        radius: 12,
+                        backgroundColor: Colors.purple,
+                        backgroundImage: video.userProfile?.avatarUrl != null
+                            ? NetworkImage(video.userProfile!.avatarUrl!)
+                            : null,
+                        child: video.userProfile?.avatarUrl == null
+                            ? Text(
+                                video.userProfile?.initials ?? '?',
+                                style: const TextStyle(color: Colors.white, fontSize: 10),
+                              )
+                            : null,
+                      ),
+                    ),
+                    const SizedBox(width: 8),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            video.userProfile?.username ?? "不明",
+                            style: TextStyle(color: _textGray, fontSize: 12),
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                          ),
+                          Text(
+                            video.relativeTime,
+                            style: TextStyle(color: _textGray, fontSize: 11),
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                          ),
+                        ],
+                      ),
+                    ),
+                  ],
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  /// 登録チャンネル一覧を構築
+  Widget _buildChannelList() {
+    return Container(
+      width: 200,
+      color: _ytBackground,
+      child: Column(
+        children: [
+          // ヘッダー
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 16),
+            child: Row(
+              children: [
+                Icon(Icons.subscriptions, color: _ytRed, size: 24),
+                const SizedBox(width: 8),
+                const Text(
+                  '登録チャンネル',
+                  style: TextStyle(
+                    color: Colors.white,
+                    fontWeight: FontWeight.bold,
+                    fontSize: 16,
+                  ),
+                ),
+              ],
+            ),
+          ),
+          const Divider(color: Color(0xFF272727), height: 1),
+          
+          // 「すべて」のチャンネル
+          _buildChannelItem(
+            profile: null,
+            isSelected: _selectedChannelId == null,
+            label: 'すべて',
+          ),
+          
+          const Divider(color: Color(0xFF272727), height: 1),
+          
+          // 登録チャンネル一覧
+          Expanded(
+            child: ListView.builder(
+              itemCount: _subscribedChannels.length,
+              itemBuilder: (context, index) {
+                final channel = _subscribedChannels[index];
+                return _buildChannelItem(
+                  profile: channel,
+                  isSelected: _selectedChannelId == channel.id,
+                );
+              },
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  /// チャンネルアイテムを構築
+  Widget _buildChannelItem({
+    UserProfile? profile,
+    required bool isSelected,
+    String? label,
+  }) {
+    final displayLabel = label ?? profile?.username ?? '不明';
+    
+    return InkWell(
+      onTap: () => _selectChannel(profile?.id),
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+        color: isSelected ? _ytSurface : Colors.transparent,
+        child: Row(
+          children: [
+            if (profile != null)
+              CircleAvatar(
+                radius: 16,
+                backgroundColor: Colors.purple,
+                backgroundImage: profile.avatarUrl != null
+                    ? NetworkImage(profile.avatarUrl!)
+                    : null,
+                child: profile.avatarUrl == null
+                    ? Text(
+                        profile.initials,
+                        style: const TextStyle(color: Colors.white, fontSize: 12),
+                      )
+                    : null,
+              )
+            else
+              Icon(Icons.subscriptions_outlined, color: _textWhite, size: 32),
+            const SizedBox(width: 12),
+            Expanded(
+              child: Text(
+                displayLabel,
+                style: TextStyle(
+                  color: _textWhite,
+                  fontSize: 13,
+                  fontWeight: isSelected ? FontWeight.w500 : FontWeight.normal,
+                ),
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    // 画面幅を取得してレスポンシブ対応
+    final screenWidth = MediaQuery.of(context).size.width;
+    final isWideScreen = screenWidth > 800;
+
+    return Scaffold(
+      backgroundColor: _ytBackground,
+      body: SafeArea(
+        bottom: false,
+        child: Row(
+          children: [
+            // 左側のチャンネル一覧 (PCでのみ表示)
+            if (isWideScreen && _subscribedChannels.isNotEmpty)
+              _buildChannelList(),
+            
+            // 右側または全体の動画一覧
+            Expanded(
+              child: _isLoading
+                  ? Center(child: CircularProgressIndicator(color: _ytRed))
+                  : _errorMessage != null
+                      ? Center(
+                          child: Padding(
+                            padding: const EdgeInsets.all(24.0),
+                            child: Column(
+                              mainAxisAlignment: MainAxisAlignment.center,
+                              children: [
+                                Icon(Icons.error_outline, color: _ytRed, size: 48),
+                                const SizedBox(height: 16),
+                                Text(
+                                  _errorMessage!,
+                                  style: TextStyle(color: _textWhite),
+                                  textAlign: TextAlign.center,
+                                ),
+                                const SizedBox(height: 16),
+                                ElevatedButton(
+                                  onPressed: () => _loadSubscribedChannels(),
+                                  style: ElevatedButton.styleFrom(
+                                    backgroundColor: _ytSurface,
+                                    foregroundColor: _textWhite,
+                                  ),
+                                  child: const Text('再読み込み'),
+                                ),
+                              ],
+                            ),
+                          ),
+                        )
+                      : CustomScrollView(
+                          slivers: [
+                            // ヘッダー (スマホサイズのみ表示)
+                            if (!isWideScreen)
+                              SliverAppBar(
+                                floating: true,
+                                backgroundColor: _ytBackground.withValues(alpha: 0.95),
+                                elevation: 0,
+                                titleSpacing: 0,
+                                leadingWidth: 0,
+                                leading: const SizedBox.shrink(),
+                                automaticallyImplyLeading: false,
+                                title: Padding(
+                                  padding: const EdgeInsets.only(left: 12),
+                                  child: Row(
+                                    children: [
+                                      Icon(Icons.subscriptions, color: _ytRed, size: 28),
+                                      const SizedBox(width: 8),
+                                      const Text(
+                                        '登録チャンネル',
+                                        style: TextStyle(
+                                          color: Colors.white,
+                                          fontWeight: FontWeight.bold,
+                                          fontSize: 20,
+                                        ),
+                                      ),
+                                    ],
+                                  ),
+                                ),
+                                actions: [
+                                  if (_subscribedChannels.isNotEmpty)
+                                    IconButton(
+                                      icon: Icon(Icons.filter_list, color: _textWhite),
+                                      onPressed: () {
+                                        // チャンネル選択ダイアログを表示
+                                        _showChannelSelectionDialog();
+                                      },
+                                    ),
+                                ],
+                              ),
+
+                            // カテゴリフィルターチップ
+                            if (_subscribedChannels.isNotEmpty)
+                              _buildCategoryPills(),
+
+                            // コンテンツ
+                            if (_subscribedChannels.isEmpty)
+                              SliverFillRemaining(
+                                child: Center(
+                                  child: Column(
+                                    mainAxisAlignment: MainAxisAlignment.center,
+                                    children: [
+                                      Icon(Icons.subscriptions_outlined,
+                                          size: 80, color: _ytSurface),
+                                      const SizedBox(height: 16),
+                                      Text('登録チャンネルがありません',
+                                          style: TextStyle(color: _textGray)),
+                                      const SizedBox(height: 8),
+                                      Text('チャンネルを登録すると、ここに動画が表示されます',
+                                          style: TextStyle(color: _textGray, fontSize: 12)),
+                                    ],
+                                  ),
+                                ),
+                              )
+                            else if (_filteredVideos.isEmpty)
+                              SliverFillRemaining(
+                                child: Center(
+                                  child: Column(
+                                    mainAxisAlignment: MainAxisAlignment.center,
+                                    children: [
+                                      Icon(Icons.video_library_outlined,
+                                          size: 80, color: _ytSurface),
+                                      const SizedBox(height: 16),
+                                      Text('動画がありません',
+                                          style: TextStyle(color: _textGray)),
+                                    ],
+                                  ),
+                                ),
+                              )
+                            else
+                              // グリッドレイアウトで動画を表示
+                              SliverPadding(
+                                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 8),
+                                sliver: SliverGrid(
+                                  gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
+                                    crossAxisCount: _getGridColumnCount(screenWidth, isWideScreen),
+                                    childAspectRatio: 0.75, // カードの縦横比
+                                    crossAxisSpacing: 8,
+                                    mainAxisSpacing: 8,
+                                  ),
+                                  delegate: SliverChildBuilderDelegate(
+                                    (context, index) {
+                                      return _buildVideoCard(_filteredVideos[index]);
+                                    },
+                                    childCount: _filteredVideos.length,
+                                  ),
+                                ),
+                              ),
+
+                            const SliverToBoxAdapter(child: SizedBox(height: 80)),
+                          ],
+                        ),
+            ),
+          ],
+        ),
+      ),
+      // ボトムナビゲーション
+      bottomNavigationBar: const AppBottomNavigationBar(currentIndex: 3),
+    );
+  }
+
+  /// チャンネル選択ダイアログを表示 (スマホサイズ用)
+  void _showChannelSelectionDialog() {
+    showModalBottomSheet(
+      context: context,
+      backgroundColor: _ytSurface,
+      builder: (context) {
+        return Container(
+          padding: const EdgeInsets.symmetric(vertical: 16),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                child: Text(
+                  'チャンネルを選択',
+                  style: TextStyle(
+                    color: _textWhite,
+                    fontSize: 16,
+                    fontWeight: FontWeight.bold,
+                  ),
+                ),
+              ),
+              const Divider(color: Color(0xFF3F3F3F)),
+              
+              // 「すべて」
+              ListTile(
+                leading: Icon(Icons.subscriptions_outlined, color: _textWhite),
+                title: Text('すべて', style: TextStyle(color: _textWhite)),
+                trailing: _selectedChannelId == null
+                    ? Icon(Icons.check, color: _ytRed)
+                    : null,
+                onTap: () {
+                  Navigator.pop(context);
+                  _selectChannel(null);
+                },
+              ),
+              
+              const Divider(color: Color(0xFF3F3F3F)),
+              
+              // 登録チャンネル一覧
+              ..._subscribedChannels.map((channel) {
+                final isSelected = _selectedChannelId == channel.id;
+                return ListTile(
+                  leading: CircleAvatar(
+                    radius: 18,
+                    backgroundColor: Colors.purple,
+                    backgroundImage: channel.avatarUrl != null
+                        ? NetworkImage(channel.avatarUrl!)
+                        : null,
+                    child: channel.avatarUrl == null
+                        ? Text(
+                            channel.initials,
+                            style: const TextStyle(color: Colors.white, fontSize: 12),
+                          )
+                        : null,
+                  ),
+                  title: Text(channel.username, style: TextStyle(color: _textWhite)),
+                  trailing: isSelected ? Icon(Icons.check, color: _ytRed) : null,
+                  onTap: () {
+                    Navigator.pop(context);
+                    _selectChannel(channel.id);
+                  },
+                );
+              }),
+            ],
+          ),
+        );
+      },
+    );
+  }
+}

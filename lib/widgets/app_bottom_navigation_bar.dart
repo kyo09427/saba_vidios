@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import '../screens/home/home_screen.dart';
 import '../screens/post/post_video_screen.dart';
 import '../screens/profile/my_page_screen.dart';
+import '../screens/subscriptions/subscriptions_screen.dart';
 
 /// 共通のボトムナビゲーションバー
 class AppBottomNavigationBar extends StatelessWidget {
@@ -38,8 +39,8 @@ class AppBottomNavigationBar extends StatelessWidget {
         );
         break;
       case 3: // 登録チャンネル
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('登録チャンネル機能は準備中です')),
+        Navigator.of(context).pushReplacement(
+          MaterialPageRoute(builder: (_) => const SubscriptionsScreen()),
         );
         break;
       case 4: // マイページ

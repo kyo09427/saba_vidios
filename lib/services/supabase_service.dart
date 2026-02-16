@@ -405,4 +405,175 @@ class SupabaseService {
     _client = null;
     _sharedPassword = null;
   }
+
+  // ============================================
+  // チャンネル登録関連メソッド
+  // ============================================
+
+  /// チャンネルを登録
+  /// 
+  /// [channelId] 登録するチャンネル（ユーザー）のID
+  /// 
+  /// Throws:
+  ///   - [Exception] 自分自身を登録しようとした場合
+  ///   - [Exception] 既に登録済みの場合
+  ///   - [Exception] 登録に失敗した場合
+  Future<void> subscribeToChannel(String channelId) async {
+    try {
+      final currentUserId = currentUser?.id;
+      if (currentUserId == null) {
+        throw Exception('ログインが必要です');
+      }
+
+      if (currentUserId == channelId) {
+        throw Exception('自分自身のチャンネルは登録できません');
+      }
+
+      if (kDebugMode) {
+        debugPrint('📺 Subscribing to channel: $channelId');
+      }
+
+      await client.from('subscriptions').insert({
+        'subscriber_id': currentUserId,
+        'channel_id': channelId,
+      });
+
+      if (kDebugMode) {
+        debugPrint('✅ Successfully subscribed to channel: $channelId');
+      }
+    } catch (e) {
+      if (kDebugMode) {
+        debugPrint('❌ Failed to subscribe to channel: $e');
+      }
+      rethrow;
+    }
+  }
+
+  /// チャンネル登録を解除
+  /// 
+  /// [channelId] 登録解除するチャンネル（ユーザー）のID
+  /// 
+  /// Throws:
+  ///   - [Exception] 登録解除に失敗した場合
+  Future<void> unsubscribeFromChannel(String channelId) async {
+    try {
+      final currentUserId = currentUser?.id;
+      if (currentUserId == null) {
+        throw Exception('ログインが必要です');
+      }
+
+      if (kDebugMode) {
+        debugPrint('📺 Unsubscribing from channel: $channelId');
+      }
+
+      await client
+          .from('subscriptions')
+          .delete()
+          .eq('subscriber_id', currentUserId)
+          .eq('channel_id', channelId);
+
+      if (kDebugMode) {
+        debugPrint('✅ Successfully unsubscribed from channel: $channelId');
+      }
+    } catch (e) {
+      if (kDebugMode) {
+        debugPrint('❌ Failed to unsubscribe from channel: $e');
+      }
+      rethrow;
+    }
+  }
+
+  /// チャンネルを登録しているかチェック
+  /// 
+  /// [channelId] チェックするチャンネル（ユーザー）のID
+  /// 
+  /// Returns: 登録している場合true、それ以外false
+  Future<bool> isSubscribed(String channelId) async {
+    try {
+      final currentUserId = currentUser?.id;
+      if (currentUserId == null) {
+        return false;
+      }
+
+      final result = await client
+          .from('subscriptions')
+          .select()
+          .eq('subscriber_id', currentUserId)
+          .eq('channel_id', channelId)
+          .maybeSingle();
+
+      return result != null;
+    } catch (e) {
+      if (kDebugMode) {
+        debugPrint('❌ Failed to check subscription status: $e');
+      }
+      return false;
+    }
+  }
+
+  /// チャンネルの登録者数を取得
+  /// 
+  /// [channelId] チャンネル（ユーザー）のID
+  /// 
+  /// Returns: 登録者数
+  Future<int> getSubscriberCount(String channelId) async {
+    try {
+      final result = await client
+          .from('subscriptions')
+          .select()
+          .eq('channel_id', channelId);
+
+      return (result as List).length;
+    } catch (e) {
+      if (kDebugMode) {
+        debugPrint('❌ Failed to get subscriber count: $e');
+      }
+      return 0;
+    }
+  }
+
+  /// 登録しているチャンネルのIDリストを取得
+  /// 
+  /// Returns: 登録チャンネルのIDリスト
+  Future<List<String>> getSubscribedChannelIds() async {
+    try {
+      final currentUserId = currentUser?.id;
+      if (currentUserId == null) {
+        return [];
+      }
+
+      final result = await client
+          .from('subscriptions')
+          .select('channel_id')
+          .eq('subscriber_id', currentUserId);
+
+      return (result as List).map((e) => e['channel_id'] as String).toList();
+    } catch (e) {
+      if (kDebugMode) {
+        debugPrint('❌ Failed to get subscribed channel IDs: $e');
+      }
+      return [];
+    }
+  }
+
+  /// チャンネルの動画数を取得
+  /// 
+  /// [channelId] チャンネル（ユーザー）のID
+  /// 
+  /// Returns: 動画数
+  Future<int> getChannelVideoCount(String channelId) async {
+    try {
+      final result = await client
+          .from('videos')
+          .select()
+          .eq('user_id', channelId);
+
+      return (result as List).length;
+    } catch (e) {
+      if (kDebugMode) {
+        debugPrint('❌ Failed to get channel video count: $e');
+      }
+      return 0;
+    }
+  }
 }

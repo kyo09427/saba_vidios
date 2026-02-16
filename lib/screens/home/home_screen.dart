@@ -5,6 +5,7 @@ import '../../services/supabase_service.dart';
 import '../../services/youtube_service.dart';
 import '../../widgets/app_bottom_navigation_bar.dart';
 import '../auth/login_screen.dart';
+import '../channel/channel_screen.dart';
 import '../post/post_video_screen.dart';
 
 class HomeScreen extends StatefulWidget {
@@ -255,7 +256,6 @@ class _HomeScreenState extends State<HomeScreen> {
 
   /// カテゴリフィルター部分
   Widget _buildCategoryPills() {
-    final categories = ['すべて', '新しい動画', 'ゲーム', '音楽', 'ライブ', 'ミックス', '料理', 'ペット'];
     return SliverToBoxAdapter(
       child: Container(
         height: 48,
@@ -263,9 +263,10 @@ class _HomeScreenState extends State<HomeScreen> {
         child: ListView.separated(
           scrollDirection: Axis.horizontal,
           padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-          itemCount: categories.length + 1,
+          itemCount: _filterCategories.length + 1, // +1 for explore icon
           separatorBuilder: (_, __) => const SizedBox(width: 8),
           itemBuilder: (context, index) {
+            // 探索アイコン
             if (index == 0) {
               return Container(
                 padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
@@ -277,21 +278,30 @@ class _HomeScreenState extends State<HomeScreen> {
               );
             }
             
-            final category = categories[index - 1];
-            final isSelected = index == 1;
-            return Container(
-              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-              decoration: BoxDecoration(
-                color: isSelected ? _textWhite : _ytSurface,
-                borderRadius: BorderRadius.circular(8),
-              ),
-              child: Center(
-                child: Text(
-                  category,
-                  style: TextStyle(
-                    color: isSelected ? Colors.black : _textWhite,
-                    fontWeight: FontWeight.w500,
-                    fontSize: 14,
+            final category = _filterCategories[index - 1];
+            final isSelected = _selectedFilter == category;
+            
+            return GestureDetector(
+              onTap: () {
+                setState(() {
+                  _selectedFilter = category;
+                  _applyFilter();
+                });
+              },
+              child: Container(
+                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                decoration: BoxDecoration(
+                  color: isSelected ? _textWhite : _ytSurface,
+                  borderRadius: BorderRadius.circular(8),
+                ),
+                child: Center(
+                  child: Text(
+                    category,
+                    style: TextStyle(
+                      color: isSelected ? Colors.black : _textWhite,
+                      fontWeight: FontWeight.w500,
+                      fontSize: 14,
+                    ),
                   ),
                 ),
               ),
@@ -517,18 +527,27 @@ class _HomeScreenState extends State<HomeScreen> {
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 // ユーザーアバター（実際のプロフィール情報を使用）
-                CircleAvatar(
-                  radius: 18,
-                  backgroundColor: Colors.purple,
-                  backgroundImage: video.userProfile?.avatarUrl != null
-                      ? NetworkImage(video.userProfile!.avatarUrl!)
-                      : null,
-                  child: video.userProfile?.avatarUrl == null
-                      ? Text(
-                          video.userProfile?.initials ?? '?',
-                          style: const TextStyle(color: Colors.white, fontSize: 14),
-                        )
-                      : null,
+                GestureDetector(
+                  onTap: () {
+                    Navigator.of(context).push(
+                      MaterialPageRoute(
+                        builder: (_) => ChannelScreen(channelId: video.userId),
+                      ),
+                    );
+                  },
+                  child: CircleAvatar(
+                    radius: 18,
+                    backgroundColor: Colors.purple,
+                    backgroundImage: video.userProfile?.avatarUrl != null
+                        ? NetworkImage(video.userProfile!.avatarUrl!)
+                        : null,
+                    child: video.userProfile?.avatarUrl == null
+                        ? Text(
+                            video.userProfile?.initials ?? '?',
+                            style: const TextStyle(color: Colors.white, fontSize: 14),
+                          )
+                        : null,
+                  ),
                 ),
                 const SizedBox(width: 12),
                 Expanded(
