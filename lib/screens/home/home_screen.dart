@@ -572,61 +572,22 @@ class _HomeScreenState extends State<HomeScreen> {
                         maxLines: 1,
                         overflow: TextOverflow.ellipsis,
                       ),
-                      const SizedBox(height: 6),
-                      // カテゴリとタグ
-                      Wrap(
-                        spacing: 6,
-                        runSpacing: 4,
-                        children: [
-                          // メインカテゴリバッジ
-                          Container(
-                            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
-                            decoration: BoxDecoration(
-                              color: _getCategoryColor(video.mainCategory),
-                              borderRadius: BorderRadius.circular(4),
-                            ),
-                            child: Text(
-                              video.mainCategory,
-                              style: const TextStyle(
-                                color: Colors.white,
-                                fontSize: 11,
-                                fontWeight: FontWeight.w600,
-                              ),
-                            ),
+                      const SizedBox(height: 4),
+                      // メインカテゴリバッジのみ表示（サブカテゴリタグは内部で検索等に使用）
+                      Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                        decoration: BoxDecoration(
+                          color: _getCategoryColor(video.mainCategory),
+                          borderRadius: BorderRadius.circular(4),
+                        ),
+                        child: Text(
+                          video.mainCategory,
+                          style: const TextStyle(
+                            color: Colors.white,
+                            fontSize: 11,
+                            fontWeight: FontWeight.w600,
                           ),
-                          // サブカテゴリタグ（最大3つまで表示）
-                          ...video.tags.take(3).map((tag) => Container(
-                            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
-                            decoration: BoxDecoration(
-                              color: _ytSurface,
-                              borderRadius: BorderRadius.circular(4),
-                              border: Border.all(color: Colors.grey.shade700, width: 1),
-                            ),
-                            child: Text(
-                              tag,
-                              style: TextStyle(
-                                color: _textGray,
-                                fontSize: 11,
-                              ),
-                            ),
-                          )),
-                          // 残りのタグ数を表示
-                          if (video.tags.length > 3)
-                            Container(
-                              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
-                              decoration: BoxDecoration(
-                                color: _ytSurface,
-                                borderRadius: BorderRadius.circular(4),
-                              ),
-                              child: Text(
-                                '+${video.tags.length - 3}',
-                                style: TextStyle(
-                                  color: _textGray,
-                                  fontSize: 11,
-                                ),
-                              ),
-                            ),
-                        ],
+                        ),
                       ),
                     ],
                   ),
@@ -678,16 +639,16 @@ class _HomeScreenState extends State<HomeScreen> {
     
     if (screenWidth < 600) {
       crossAxisCount = 1;
-      childAspectRatio = 1.0; // 1列の場合は正方形に近い比率
+      childAspectRatio = 1.0; // 1列はSliverListを使うので参照されない
     } else if (screenWidth < 900) {
       crossAxisCount = 2;
-      childAspectRatio = 0.85;
+      childAspectRatio = 1.05; // タグなし・2列
     } else if (screenWidth < 1200) {
       crossAxisCount = 3;
-      childAspectRatio = 0.8;
+      childAspectRatio = 1.0; // タグなし・3列
     } else {
       crossAxisCount = 4;
-      childAspectRatio = 0.75;
+      childAspectRatio = 0.95; // タグなし・4列
     }
 
     return Scaffold(
@@ -819,28 +780,39 @@ class _HomeScreenState extends State<HomeScreen> {
                             ),
                           )
                         else ...[
-                          // 動画グリッド
-                          SliverPadding(
-                            padding: EdgeInsets.symmetric(
-                              horizontal: crossAxisCount == 1 ? 0 : 12,
-                              vertical: 12,
-                            ),
-                            sliver: SliverGrid(
-                              gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
-                                crossAxisCount: crossAxisCount,
-                                childAspectRatio: childAspectRatio,
-                                crossAxisSpacing: 12,
-                                mainAxisSpacing: 12,
-                              ),
+                          // 動画リスト/グリッド
+                          // 1列はSliverList（自然な高さ）、複数列はSliverGrid
+                          if (crossAxisCount == 1)
+                            SliverList(
                               delegate: SliverChildBuilderDelegate(
                                 (context, index) {
                                   return _buildVideoCard(_filteredVideos[index]);
                                 },
                                 childCount: _filteredVideos.length,
                               ),
+                            )
+                          else
+                            SliverPadding(
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: 12,
+                                vertical: 12,
+                              ),
+                              sliver: SliverGrid(
+                                gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
+                                  crossAxisCount: crossAxisCount,
+                                  childAspectRatio: childAspectRatio,
+                                  crossAxisSpacing: 12,
+                                  mainAxisSpacing: 12,
+                                ),
+                                delegate: SliverChildBuilderDelegate(
+                                  (context, index) {
+                                    return _buildVideoCard(_filteredVideos[index]);
+                                  },
+                                  childCount: _filteredVideos.length,
+                                ),
+                              ),
                             ),
-                          ),
-                          
+
                           const SliverToBoxAdapter(child: SizedBox(height: 80)),
                         ],
                       ],

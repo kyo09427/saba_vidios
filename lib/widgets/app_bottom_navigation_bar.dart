@@ -3,6 +3,7 @@ import '../screens/home/home_screen.dart';
 import '../screens/post/post_video_screen.dart';
 import '../screens/profile/my_page_screen.dart';
 import '../screens/subscriptions/subscriptions_screen.dart';
+import '../screens/timeline/timeline_screen.dart';
 
 /// 共通のボトムナビゲーションバー
 class AppBottomNavigationBar extends StatelessWidget {
@@ -28,9 +29,9 @@ class AppBottomNavigationBar extends StatelessWidget {
           MaterialPageRoute(builder: (_) => const HomeScreen()),
         );
         break;
-      case 1: // ショート
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('ショート機能は準備中です')),
+      case 1: // タイムライン
+        Navigator.of(context).pushReplacement(
+          MaterialPageRoute(builder: (_) => const TimelineScreen()),
         );
         break;
       case 2: // 投稿
@@ -106,8 +107,8 @@ class AppBottomNavigationBar extends StatelessWidget {
           ),
           _buildNavItem(
             context: context,
-            icon: Icons.bolt,
-            label: 'ショート',
+            icon: Icons.timeline,
+            label: 'タイムライン',
             index: 1,
           ),
           // 投稿ボタン（中央）

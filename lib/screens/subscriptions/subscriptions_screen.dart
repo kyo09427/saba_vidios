@@ -678,24 +678,34 @@ class _SubscriptionsScreenState extends State<SubscriptionsScreen> {
                                 ),
                               )
                             else
-                              // グリッドレイアウトで動画を表示
-                              SliverPadding(
-                                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 8),
-                                sliver: SliverGrid(
-                                  gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
-                                    crossAxisCount: _getGridColumnCount(screenWidth, isWideScreen),
-                                    childAspectRatio: 0.75, // カードの縦横比
-                                    crossAxisSpacing: 8,
-                                    mainAxisSpacing: 8,
-                                  ),
+                              // 1列はSliverList（自然な高さ）、複数列はSliverGrid
+                              if (_getGridColumnCount(screenWidth, isWideScreen) == 1)
+                                SliverList(
                                   delegate: SliverChildBuilderDelegate(
                                     (context, index) {
                                       return _buildVideoCard(_filteredVideos[index]);
                                     },
                                     childCount: _filteredVideos.length,
                                   ),
+                                )
+                              else
+                                SliverPadding(
+                                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 8),
+                                  sliver: SliverGrid(
+                                    gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
+                                      crossAxisCount: _getGridColumnCount(screenWidth, isWideScreen),
+                                      childAspectRatio: 1.05, // タグなし・複数列
+                                      crossAxisSpacing: 8,
+                                      mainAxisSpacing: 8,
+                                    ),
+                                    delegate: SliverChildBuilderDelegate(
+                                      (context, index) {
+                                        return _buildVideoCard(_filteredVideos[index]);
+                                      },
+                                      childCount: _filteredVideos.length,
+                                    ),
+                                  ),
                                 ),
-                              ),
 
                             const SliverToBoxAdapter(child: SizedBox(height: 80)),
                           ],
