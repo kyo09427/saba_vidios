@@ -4,8 +4,6 @@ on:
   push:
     branches:
       - main
-    paths:
-      - 'web-app/**'
   workflow_dispatch:
 
 jobs:
@@ -19,15 +17,26 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Replace Supabase config
+      - name: Set up Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          channel: 'stable'
+
+      - name: Create .env file
         run: |
-          sed -i "s|YOUR_SUPABASE_URL|${{ secrets.SUPABASE_URL }}|g" web-app/js/supabase.js
-          sed -i "s|YOUR_SUPABASE_ANON_KEY|${{ secrets.SUPABASE_ANON_KEY }}|g" web-app/js/supabase.js
-          sed -i "s|YOUR_SHARED_PASSWORD|${{ secrets.SHARED_PASSWORD }}|g" web-app/js/supabase.js
+          echo "SUPABASE_URL=${{ secrets.SUPABASE_URL }}" > .env
+          echo "SUPABASE_ANON_KEY=${{ secrets.SUPABASE_ANON_KEY }}" >> .env
+          echo "SHARED_PASSWORD=${{ secrets.SHARED_PASSWORD }}" >> .env
+
+      - name: Install dependencies
+        run: flutter pub get
+
+      - name: Build Web App
+        run: flutter build web
 
       - name: Deploy to Cloudflare Pages
         uses: cloudflare/wrangler-action@v3
         with:
           apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
-          command: pages deploy web-app --project-name=saba-vidios
+          command: pages deploy build/web --project-name=saba-vidios
