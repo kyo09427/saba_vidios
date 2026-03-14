@@ -1,8 +1,10 @@
 import 'package:flutter/material.dart';
 import '../../models/video.dart';
+import '../../services/cache_service.dart';
 import '../../services/supabase_service.dart';
 import '../../services/youtube_service.dart';
 import '../../widgets/app_bottom_navigation_bar.dart';
+import '../../widgets/skeleton_widgets.dart';
 import '../channel/channel_screen.dart';
 
 /// タイムライン画面
@@ -76,8 +78,34 @@ class _TimelineScreenState extends State<TimelineScreen> {
   }
 
   /// 動画を読み込んで年月別にグループ化
-  Future<void> _loadVideos() async {
+  Future<void> _loadVideos({bool isRefresh = false}) async {
     if (!mounted) return;
+
+    // ── キャッシュ読み込み（初回表示のみ、リフレッシュ時はスキップ）──
+    if (!isRefresh) {
+      final cached = CacheService.instance
+          .get<Map<String, List<Video>>>(CacheKeys.timelineVideos);
+      if (cached != null) {
+        final sortedKeys = cached.keys.toList()..sort((a, b) => b.compareTo(a));
+        final firstYear =
+            sortedKeys.isNotEmpty ? sortedKeys.first.split('-').first : null;
+        for (final key in sortedKeys) {
+          _sectionKeys.putIfAbsent(key, () => GlobalKey());
+        }
+        if (mounted) {
+          setState(() {
+            _groupedVideos = cached;
+            _sortedMonthKeys = sortedKeys;
+            _expandedYear = firstYear;
+            _activeSectionKey =
+                sortedKeys.isNotEmpty ? sortedKeys.first : null;
+            _isLoading = false;
+          });
+        }
+        return;
+      }
+    }
+
     setState(() {
       _isLoading = true;
       _errorMessage = null;
@@ -140,6 +168,10 @@ class _TimelineScreenState extends State<TimelineScreen> {
       final firstYear = sortedKeys.isNotEmpty
           ? sortedKeys.first.split('-').first
           : null;
+
+      // キャッシュに保存
+      CacheService.instance.set<Map<String, List<Video>>>(
+          CacheKeys.timelineVideos, grouped);
 
       if (mounted) {
         setState(() {
@@ -565,7 +597,58 @@ class _TimelineScreenState extends State<TimelineScreen> {
     );
   }
 
+  /// スケルトンビュー（初回ロード中に表示）
+  Widget _buildSkeletonView() {
+    return Container(
+      color: _ytBackground,
+      child: CustomScrollView(
+        physics: const NeverScrollableScrollPhysics(),
+        slivers: [
+          SliverAppBar(
+            floating: true,
+            backgroundColor: _ytBackground.withValues(alpha: 0.95),
+            elevation: 0,
+            titleSpacing: 0,
+            leadingWidth: 0,
+            leading: const SizedBox.shrink(),
+            automaticallyImplyLeading: false,
+            title: Padding(
+              padding: const EdgeInsets.only(left: 12),
+              child: Row(
+                children: [
+                  Icon(Icons.timeline, color: _ytRed, size: 28),
+                  const SizedBox(width: 8),
+                  Text(
+                    'タイムライン',
+                    style: TextStyle(
+                      color: _textWhite,
+                      fontWeight: FontWeight.bold,
+                      fontSize: 20,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+          // 月ヘッダースケルトン
+          SliverToBoxAdapter(
+            child: Padding(
+              padding: const EdgeInsets.fromLTRB(16, 24, 16, 12),
+              child: SkeletonBox(width: 120, height: 28),
+            ),
+          ),
+          // 動画カードスケルトン
+          const SkeletonSliverList(
+            itemBuilder: SkeletonVideoCardSmall.new,
+            itemCount: 5,
+          ),
+        ],
+      ),
+    );
+  }
+
   @override
+
   Widget build(BuildContext context) {
     final screenWidth = MediaQuery.of(context).size.width;
     final isWideScreen = screenWidth > 800;
@@ -583,8 +666,7 @@ class _TimelineScreenState extends State<TimelineScreen> {
             // メインコンテンツ
             Expanded(
               child: _isLoading
-                  ? Center(
-                      child: CircularProgressIndicator(color: _ytRed))
+                  ? _buildSkeletonView()
                   : _errorMessage != null
                       ? Center(
                           child: Padding(
@@ -611,45 +693,50 @@ class _TimelineScreenState extends State<TimelineScreen> {
                             ),
                           ),
                         )
-                      : CustomScrollView(
-                          controller: _scrollController,
-                          slivers: [
-                            // ─ アプリバー ─
-                            SliverAppBar(
-                              floating: true,
-                              backgroundColor:
-                                  _ytBackground.withValues(alpha: 0.95),
-                              elevation: 0,
-                              titleSpacing: 0,
-                              leadingWidth: 0,
-                              leading: const SizedBox.shrink(),
-                              automaticallyImplyLeading: false,
-                              title: Padding(
-                                padding: const EdgeInsets.only(left: 12),
-                                child: Row(
-                                  children: [
-                                    Icon(Icons.timeline,
-                                        color: _ytRed, size: 28),
-                                    const SizedBox(width: 8),
-                                    Text(
-                                      'タイムライン',
-                                      style: TextStyle(
-                                        color: _textWhite,
-                                        fontWeight: FontWeight.bold,
-                                        fontSize: 20,
+                      : RefreshIndicator(
+                          onRefresh: () => _loadVideos(isRefresh: true),
+                          color: _ytRed,
+                          backgroundColor: _ytSurface,
+                          child: CustomScrollView(
+                            controller: _scrollController,
+                            slivers: [
+                              // ─ アプリバー ─
+                              SliverAppBar(
+                                floating: true,
+                                backgroundColor:
+                                    _ytBackground.withValues(alpha: 0.95),
+                                elevation: 0,
+                                titleSpacing: 0,
+                                leadingWidth: 0,
+                                leading: const SizedBox.shrink(),
+                                automaticallyImplyLeading: false,
+                                title: Padding(
+                                  padding: const EdgeInsets.only(left: 12),
+                                  child: Row(
+                                    children: [
+                                      Icon(Icons.timeline,
+                                          color: _ytRed, size: 28),
+                                      const SizedBox(width: 8),
+                                      Text(
+                                        'タイムライン',
+                                        style: TextStyle(
+                                          color: _textWhite,
+                                          fontWeight: FontWeight.bold,
+                                          fontSize: 20,
+                                        ),
                                       ),
-                                    ),
-                                  ],
+                                    ],
+                                  ),
                                 ),
+                                actions: [
+                                  IconButton(
+                                    icon: Icon(Icons.refresh,
+                                        color: _textWhite),
+                                    onPressed: () =>
+                                        _loadVideos(isRefresh: true),
+                                  ),
+                                ],
                               ),
-                              actions: [
-                                IconButton(
-                                  icon: Icon(Icons.refresh,
-                                      color: _textWhite),
-                                  onPressed: _loadVideos,
-                                ),
-                              ],
-                            ),
 
                             // ─ 動画がない場合 ─
                             if (_sortedMonthKeys.isEmpty)
@@ -717,6 +804,7 @@ class _TimelineScreenState extends State<TimelineScreen> {
                             ],
                           ],
                         ),
+                        ), // RefreshIndicator
             ),
           ],
         ),

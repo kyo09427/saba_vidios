@@ -1,10 +1,12 @@
 import 'package:flutter/material.dart';
 import '../../models/user_profile.dart';
+import '../../services/cache_service.dart';
 import '../../services/profile_service.dart';
 import '../../services/supabase_service.dart';
 import '../../widgets/app_bottom_navigation_bar.dart';
 import '../auth/login_screen.dart';
 import 'edit_profile_screen.dart';
+import 'my_videos_screen.dart';
 
 /// マイページ画面
 class MyPageScreen extends StatefulWidget {
@@ -41,36 +43,71 @@ class _MyPageScreenState extends State<MyPageScreen> {
     _loadUserData();
   }
 
-  Future<void> _loadUserData() async {
+  Future<void> _loadUserData({bool isRefresh = false}) async {
+    if (!mounted) return;
+
+    final user = SupabaseService.instance.currentUser;
+    if (user == null) return;
+
+    // ── キャッシュ読み込み（リフレッシュ時はスキップ）──
+    if (!isRefresh) {
+      final cachedProfile =
+          CacheService.instance.get<UserProfile>(CacheKeys.myPageProfile);
+      final cachedCount =
+          CacheService.instance.get<int>(CacheKeys.myPageVideoCount);
+      if (cachedProfile != null && cachedCount != null) {
+        if (mounted) {
+          setState(() {
+            _userEmail = user.email;
+            _createdAt = DateTime.parse(user.createdAt);
+            _userProfile = cachedProfile;
+            _totalVideos = cachedCount;
+            _totalViews = cachedCount * 120;
+            _totalLikes = cachedCount * 15;
+            _isLoading = false;
+          });
+        }
+        return;
+      }
+    }
+
     setState(() {
       _isLoading = true;
     });
 
     try {
-      final user = SupabaseService.instance.currentUser;
+      // プロフィール情報を取得
+      final profile = await _profileService.getProfile(user.id);
       
-      if (user != null) {
-        // プロフィール情報を取得
-        final profile = await _profileService.getProfile(user.id);
-        
-        // 投稿数を取得
-        final videoCount = await _supabase
-            .from('videos')
-            .select()
-            .eq('user_id', user.id)
-            .count();
+      // 投稿数を取得
+      final videoCount = await _supabase
+          .from('videos')
+          .select()
+          .eq('user_id', user.id)
+          .count();
 
-        setState(() {
-          _userEmail = user.email;
-          _createdAt = DateTime.parse(user.createdAt);
-          _userProfile = profile;
-          _totalVideos = videoCount.count;
-          // ダミーデータ
-          _totalViews = _totalVideos * 120;
-          _totalLikes = _totalVideos * 15;
-          _isLoading = false;
-        });
+      // キャッシュに保存
+      if (profile != null) {
+        CacheService.instance.set<UserProfile>(
+          CacheKeys.myPageProfile,
+          profile,
+        );
       }
+      CacheService.instance.set<int>(
+        CacheKeys.myPageVideoCount,
+        videoCount.count,
+      );
+
+      setState(() {
+        _userEmail = user.email;
+        _createdAt = DateTime.parse(user.createdAt);
+        _userProfile = profile;
+        _totalVideos = videoCount.count;
+        // ダミーデータ
+        _totalViews = _totalVideos * 120;
+        _totalLikes = _totalVideos * 15;
+        _isLoading = false;
+      });
     } catch (e) {
       setState(() {
         _isLoading = false;
@@ -248,7 +285,9 @@ class _MyPageScreenState extends State<MyPageScreen> {
       ),
       body: _isLoading
           ? const Center(child: CircularProgressIndicator())
-          : SingleChildScrollView(
+          : RefreshIndicator(
+              onRefresh: () => _loadUserData(isRefresh: true),
+              child: SingleChildScrollView(
               child: Column(
                 children: [
                   // プロフィールヘッダー
@@ -331,9 +370,11 @@ class _MyPageScreenState extends State<MyPageScreen> {
                               ),
                             );
                             
-                            // プロフィール編集から戻ってきたら再読み込み
+                            // プロフィール編集から戻ってきたらキャッシュ無効化して再読み込み
                             if (result == true && mounted) {
-                              _loadUserData();
+                              CacheService.instance.invalidate(CacheKeys.myPageProfile);
+                              CacheService.instance.invalidate(CacheKeys.myPageVideoCount);
+                              _loadUserData(isRefresh: true);
                             }
                           },
                           icon: const Icon(Icons.edit),
@@ -484,9 +525,9 @@ class _MyPageScreenState extends State<MyPageScreen> {
                           title: '投稿した動画',
                           subtitle: '$_totalVideos件',
                           onTap: () {
-                            ScaffoldMessenger.of(context).showSnackBar(
-                              const SnackBar(
-                                content: Text('投稿動画一覧機能は準備中です'),
+                            Navigator.of(context).push(
+                              MaterialPageRoute(
+                                builder: (_) => const MyVideosScreen(),
                               ),
                             );
                           },
@@ -668,6 +709,7 @@ class _MyPageScreenState extends State<MyPageScreen> {
                 ],
               ),
             ),
+          ),
       // ボトムナビゲーション
       bottomNavigationBar: const AppBottomNavigationBar(currentIndex: 4),
     );

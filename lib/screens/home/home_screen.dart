@@ -1,9 +1,12 @@
 import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import '../../models/video.dart';
+import '../../services/cache_service.dart';
 import '../../services/supabase_service.dart';
 import '../../services/youtube_service.dart';
+import '../../utils/japanese_text_utils.dart';
 import '../../widgets/app_bottom_navigation_bar.dart';
+import '../../widgets/skeleton_widgets.dart';
 import '../auth/login_screen.dart';
 import '../channel/channel_screen.dart';
 import '../post/post_video_screen.dart';
@@ -40,6 +43,11 @@ class _HomeScreenState extends State<HomeScreen> {
   final Color _textWhite = Colors.white;
   final Color _textGray = const Color(0xFFAAAAAA);
 
+  // 検索関連
+  bool _isSearchActive = false;
+  final TextEditingController _searchController = TextEditingController();
+  String _searchQuery = '';
+
   @override
   void initState() {
     super.initState();
@@ -50,6 +58,7 @@ class _HomeScreenState extends State<HomeScreen> {
   @override
   void dispose() {
     _cleanupRealtimeSubscription();
+    _searchController.dispose();
     super.dispose();
   }
 
@@ -61,7 +70,22 @@ class _HomeScreenState extends State<HomeScreen> {
 
   Future<void> _loadVideos({bool isRefresh = false}) async {
     if (!mounted) return;
-    
+
+    // ── キャッシュ読み込み（初回表示のみ、リフレッシュ時はスキップ）──
+    if (!isRefresh) {
+      final cached = CacheService.instance.get<List<Video>>(CacheKeys.homeVideos);
+      if (cached != null) {
+        if (mounted) {
+          setState(() {
+            _videos = cached;
+            _applyFilter();
+            _isLoading = false;
+          });
+        }
+        return;
+      }
+    }
+
     setState(() {
       _isLoading = true;
       _errorMessage = null;
@@ -75,7 +99,7 @@ class _HomeScreenState extends State<HomeScreen> {
           .order('created_at', ascending: false);
 
       final videosData = response as List<dynamic>;
-      
+
       // 各動画のユーザーIDを収集（重複を除く）
       final userIds = videosData
           .map((v) => v['user_id'] as String?)
@@ -100,7 +124,7 @@ class _HomeScreenState extends State<HomeScreen> {
       Map<String, List<String>> videoTagsMap = {};
       if (videosData.isNotEmpty) {
         final videoIds = videosData.map((v) => v['id'] as String).toList();
-        
+
         // video_tagsテーブルとtagsテーブルをJOINして取得
         final tagsResponse = await _supabase
             .from('video_tags')
@@ -110,7 +134,7 @@ class _HomeScreenState extends State<HomeScreen> {
         for (final item in (tagsResponse as List)) {
           final videoId = item['video_id'] as String;
           final tagName = item['tags']['name'] as String;
-          
+
           if (!videoTagsMap.containsKey(videoId)) {
             videoTagsMap[videoId] = [];
           }
@@ -124,7 +148,7 @@ class _HomeScreenState extends State<HomeScreen> {
         if (userId != null && profilesMap.containsKey(userId)) {
           videoJson['profiles'] = profilesMap[userId];
         }
-        
+
         // タグ情報を追加
         final videoId = videoJson['id'] as String;
         if (videoTagsMap.containsKey(videoId)) {
@@ -132,11 +156,14 @@ class _HomeScreenState extends State<HomeScreen> {
         } else {
           videoJson['tags'] = [];
         }
-        
+
         return Video.fromJsonWithProfile(videoJson as Map<String, dynamic>);
       })
-      .where((video) => video.id.isNotEmpty) // 無効なデータを除外
-      .toList();
+          .where((video) => video.id.isNotEmpty)
+          .toList();
+
+      // キャッシュに保存
+      CacheService.instance.set<List<Video>>(CacheKeys.homeVideos, videos);
 
       if (mounted) {
         setState(() {
@@ -146,7 +173,7 @@ class _HomeScreenState extends State<HomeScreen> {
         });
       }
     } catch (e) {
-      print('❌ Error loading videos: $e'); // デバッグ用
+      debugPrint('❌ Error loading videos: $e');
       if (mounted) {
         setState(() {
           _errorMessage = '動画の読み込みに失敗しました';
@@ -424,15 +451,30 @@ class _HomeScreenState extends State<HomeScreen> {
 
   /// フィルターを適用
   void _applyFilter() {
+    // ステップ1: カテゴリフィルター
+    List<Video> afterCategory;
     if (_selectedFilter == 'すべて') {
-      _filteredVideos = _videos;
+      afterCategory = _videos;
     } else if (_selectedFilter == '新しい動画') {
-      // 24時間以内の動画
       final yesterday = DateTime.now().subtract(const Duration(hours: 24));
-      _filteredVideos = _videos.where((v) => v.createdAt.isAfter(yesterday)).toList();
+      afterCategory = _videos.where((v) => v.createdAt.isAfter(yesterday)).toList();
     } else {
-      // カテゴリでフィルター
-      _filteredVideos = _videos.where((v) => v.mainCategory == _selectedFilter).toList();
+      afterCategory = _videos.where((v) => v.mainCategory == _selectedFilter).toList();
+    }
+
+    // ステップ2: 検索クエリフィルター（ヒラガナ/カタカナ区別なし）
+    if (_searchQuery.isEmpty) {
+      _filteredVideos = afterCategory;
+    } else {
+      _filteredVideos = afterCategory.where((v) {
+        // タイトルで検索
+        if (containsIgnoreKana(v.title, _searchQuery)) return true;
+        // メインカテゴリで検索
+        if (containsIgnoreKana(v.mainCategory, _searchQuery)) return true;
+        // タグで検索
+        if (v.tags.any((tag) => containsIgnoreKana(tag, _searchQuery))) return true;
+        return false;
+      }).toList();
     }
   }
 
@@ -601,6 +643,74 @@ class _HomeScreenState extends State<HomeScreen> {
     );
   }
 
+  /// スケルトンビュー（初回ロード中に表示）
+  Widget _buildSkeletonView() {
+    return Container(
+      color: _ytBackground,
+      child: CustomScrollView(
+        physics: const NeverScrollableScrollPhysics(),
+        slivers: [
+          // ヘッダースケルトン
+          SliverAppBar(
+            floating: true,
+            backgroundColor: _ytBackground.withOpacity(0.95),
+            elevation: 0,
+            titleSpacing: 0,
+            leadingWidth: 0,
+            leading: const SizedBox.shrink(),
+            automaticallyImplyLeading: false,
+            title: Padding(
+              padding: const EdgeInsets.only(left: 12),
+              child: Row(
+                children: [
+                  Container(
+                    decoration: const BoxDecoration(
+                      color: Colors.white,
+                      shape: BoxShape.circle,
+                    ),
+                    child: Icon(Icons.play_circle_filled, color: _ytRed, size: 30),
+                  ),
+                  const SizedBox(width: 4),
+                  const Text(
+                    'サバの動画',
+                    style: TextStyle(
+                      color: Colors.white,
+                      fontWeight: FontWeight.bold,
+                      fontSize: 20,
+                      letterSpacing: -1,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+          // カテゴリフィルタースケルトン
+          SliverToBoxAdapter(
+            child: Container(
+              height: 48,
+              color: _ytBackground.withOpacity(0.95),
+              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+              child: Row(
+                children: List.generate(
+                  5,
+                  (i) => Padding(
+                    padding: const EdgeInsets.only(right: 8),
+                    child: SkeletonBox(width: 60 + i * 5.0, height: 32),
+                  ),
+                ),
+              ),
+            ),
+          ),
+          // 動画カードスケルトン
+          const SkeletonSliverList(
+            itemBuilder: SkeletonVideoCardLarge.new,
+            itemCount: 4,
+          ),
+        ],
+      ),
+    );
+  }
+
   Widget _buildErrorView() {
     return Center(
       child: Padding(
@@ -656,7 +766,7 @@ class _HomeScreenState extends State<HomeScreen> {
       body: SafeArea(
         bottom: false,
         child: _isLoading
-            ? Center(child: CircularProgressIndicator(color: _ytRed))
+            ? _buildSkeletonView()
             : _errorMessage != null
                 ? _buildErrorView()
                 : RefreshIndicator(
@@ -674,79 +784,141 @@ class _HomeScreenState extends State<HomeScreen> {
                           leadingWidth: 0,
                           leading: const SizedBox.shrink(),
                           automaticallyImplyLeading: false,
-                          title: Padding(
-                            padding: const EdgeInsets.only(left: 12),
-                            child: Row(
-                              children: [
-                                Container(
-                                  decoration: const BoxDecoration(
-                                    color: Colors.white,
-                                    shape: BoxShape.circle,
-                                  ),
-                                  child: Icon(Icons.play_circle_filled,
-                                      color: _ytRed, size: 30),
-                                ),
-                                const SizedBox(width: 4),
-                                const Text(
-                                  'サバの動画',
-                                  style: TextStyle(
-                                    color: Colors.white,
-                                    fontWeight: FontWeight.bold,
-                                    fontSize: 20,
-                                    letterSpacing: -1,
-                                  ),
-                                ),
-                              ],
-                            ),
-                          ),
-                          actions: [
-                            IconButton(
-                              icon: const Icon(Icons.cast),
-                              onPressed: () {},
-                              color: _textWhite,
-                            ),
-                            Stack(
-                              alignment: Alignment.center,
-                              children: [
-                                IconButton(
-                                  icon: const Icon(Icons.notifications_outlined),
-                                  onPressed: () {},
-                                  color: _textWhite,
-                                ),
-                                Positioned(
-                                  top: 12,
-                                  right: 12,
-                                  child: Container(
-                                    width: 10,
-                                    height: 10,
-                                    decoration: BoxDecoration(
-                                      color: _ytRed,
-                                      border: Border.all(
-                                          color: _ytBackground, width: 1.5),
-                                      borderRadius: BorderRadius.circular(5),
+                           title: _isSearchActive
+                              ? Builder(builder: (context) {
+                                  final isDark =
+                                      MediaQuery.of(context).platformBrightness ==
+                                          Brightness.dark;
+                                  final textColor =
+                                      isDark ? Colors.white : Colors.black87;
+                                  final hintColor =
+                                      isDark ? const Color(0xFFAAAAAA) : Colors.black45;
+                                  return Padding(
+                                    padding: const EdgeInsets.only(left: 8),
+                                    child: Container(
+                                      height: 38,
+                                      padding: const EdgeInsets.symmetric(horizontal: 12),
+                                      decoration: BoxDecoration(
+                                        color: isDark
+                                            ? const Color(0xFF3A3A3A)
+                                            : Colors.grey.shade200,
+                                        borderRadius: BorderRadius.circular(20),
+                                      ),
+                                      child: TextField(
+                                        controller: _searchController,
+                                        autofocus: true,
+                                        style:
+                                            TextStyle(color: textColor, fontSize: 14),
+                                        cursorColor: _ytRed,
+                                        decoration: InputDecoration(
+                                          hintText: 'タイトル・カテゴリ・タグで検索',
+                                          hintStyle:
+                                              TextStyle(color: hintColor, fontSize: 13),
+                                          border: InputBorder.none,
+                                          contentPadding:
+                                              const EdgeInsets.symmetric(vertical: 9),
+                                          prefixIcon: Icon(Icons.search,
+                                              size: 18, color: hintColor),
+                                          prefixIconConstraints:
+                                              const BoxConstraints(minWidth: 32),
+                                        ),
+                                        onChanged: (value) {
+                                          setState(() {
+                                            _searchQuery = value;
+                                            _applyFilter();
+                                          });
+                                        },
+                                      ),
                                     ),
+                                  );
+                                })
+                              : Padding(
+                                  padding: const EdgeInsets.only(left: 12),
+                                  child: Row(
+                                    children: [
+                                      Container(
+                                        decoration: const BoxDecoration(
+                                          color: Colors.white,
+                                          shape: BoxShape.circle,
+                                        ),
+                                        child: Icon(Icons.play_circle_filled,
+                                            color: _ytRed, size: 30),
+                                      ),
+                                      const SizedBox(width: 4),
+                                      const Text(
+                                        'サバの動画',
+                                        style: TextStyle(
+                                          color: Colors.white,
+                                          fontWeight: FontWeight.bold,
+                                          fontSize: 20,
+                                          letterSpacing: -1,
+                                        ),
+                                      ),
+                                    ],
                                   ),
-                                )
-                              ],
-                            ),
+                                ),
+                          actions: [
+                            if (!_isSearchActive) ...[
+                              IconButton(
+                                icon: const Icon(Icons.cast),
+                                onPressed: () {},
+                                color: _textWhite,
+                              ),
+                              Stack(
+                                alignment: Alignment.center,
+                                children: [
+                                  IconButton(
+                                    icon: const Icon(Icons.notifications_outlined),
+                                    onPressed: () {},
+                                    color: _textWhite,
+                                  ),
+                                  Positioned(
+                                    top: 12,
+                                    right: 12,
+                                    child: Container(
+                                      width: 10,
+                                      height: 10,
+                                      decoration: BoxDecoration(
+                                        color: _ytRed,
+                                        border: Border.all(
+                                            color: _ytBackground, width: 1.5),
+                                        borderRadius: BorderRadius.circular(5),
+                                      ),
+                                    ),
+                                  )
+                                ],
+                              ),
+                            ],
                             IconButton(
-                              icon: const Icon(Icons.search),
-                              onPressed: () {},
+                              icon: Icon(
+                                _isSearchActive ? Icons.close : Icons.search,
+                              ),
+                              onPressed: () {
+                                setState(() {
+                                  _isSearchActive = !_isSearchActive;
+                                  if (!_isSearchActive) {
+                                    _searchController.clear();
+                                    _searchQuery = '';
+                                    _applyFilter();
+                                  }
+                                });
+                              },
                               color: _textWhite,
                             ),
-                            Padding(
-                              padding: const EdgeInsets.only(right: 12, left: 4),
-                              child: GestureDetector(
-                                onTap: _handleLogout,
-                                child: const CircleAvatar(
-                                  radius: 12,
-                                  backgroundColor: Colors.purple,
-                                  child: Text('S',
-                                      style: TextStyle(
-                                          fontSize: 12, color: Colors.white)),
+                            if (!_isSearchActive)
+                              Padding(
+                                padding: const EdgeInsets.only(right: 12, left: 4),
+                                child: GestureDetector(
+                                  onTap: _handleLogout,
+                                  child: const CircleAvatar(
+                                    radius: 12,
+                                    backgroundColor: Colors.purple,
+                                    child: Text('S',
+                                        style: TextStyle(
+                                            fontSize: 12, color: Colors.white)),
+                                  ),
                                 ),
                               ),
-                            ),
                           ],
                         ),
 

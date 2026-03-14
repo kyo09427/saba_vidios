@@ -1,9 +1,11 @@
 import 'package:flutter/material.dart';
 import '../../models/user_profile.dart';
 import '../../models/video.dart';
+import '../../services/cache_service.dart';
 import '../../services/supabase_service.dart';
 import '../../services/youtube_service.dart';
 import '../../widgets/app_bottom_navigation_bar.dart';
+import '../../widgets/skeleton_widgets.dart';
 import '../channel/channel_screen.dart';
 
 /// 登録チャンネル画面
@@ -51,9 +53,28 @@ class _SubscriptionsScreenState extends State<SubscriptionsScreen> {
   }
 
   /// 登録チャンネル一覧を読み込む
-  Future<void> _loadSubscribedChannels() async {
+  Future<void> _loadSubscribedChannels({bool isRefresh = false}) async {
     if (!mounted) return;
-    
+
+    // ── キャッシュ読み込み（初回表示のみ）──
+    if (!isRefresh) {
+      final cachedChannels =
+          CacheService.instance.get<List<UserProfile>>(CacheKeys.subscribedChannelIds);
+      final cachedVideos =
+          CacheService.instance.get<List<Video>>(CacheKeys.subscriptionVideos);
+      if (cachedChannels != null && cachedVideos != null) {
+        if (mounted) {
+          setState(() {
+            _subscribedChannels = cachedChannels;
+            _videos = cachedVideos;
+            _applyFilter();
+            _isLoading = false;
+          });
+        }
+        return;
+      }
+    }
+
     setState(() {
       _isLoading = true;
       _errorMessage = null;
@@ -83,6 +104,10 @@ class _SubscriptionsScreenState extends State<SubscriptionsScreen> {
       final channels = (profilesResponse as List)
           .map((p) => UserProfile.fromJson(p as Map<String, dynamic>))
           .toList();
+
+      // キャッシュに保存（チャンネル一覧）
+      CacheService.instance.set<List<UserProfile>>(
+          CacheKeys.subscribedChannelIds, channels);
 
       if (mounted) {
         setState(() {
@@ -166,6 +191,9 @@ class _SubscriptionsScreenState extends State<SubscriptionsScreen> {
       })
       .where((video) => video.id.isNotEmpty)
       .toList();
+
+      // キャッシュに保存（動画一覧）
+      CacheService.instance.set<List<Video>>(CacheKeys.subscriptionVideos, videos);
 
       if (mounted) {
         setState(() {
@@ -570,7 +598,7 @@ class _SubscriptionsScreenState extends State<SubscriptionsScreen> {
             // 右側または全体の動画一覧
             Expanded(
               child: _isLoading
-                  ? Center(child: CircularProgressIndicator(color: _ytRed))
+                  ? _buildSkeletonView()
                   : _errorMessage != null
                       ? Center(
                           child: Padding(
@@ -598,7 +626,11 @@ class _SubscriptionsScreenState extends State<SubscriptionsScreen> {
                             ),
                           ),
                         )
-                      : CustomScrollView(
+                      : RefreshIndicator(
+                          onRefresh: () => _loadSubscribedChannels(isRefresh: true),
+                          color: _ytRed,
+                          backgroundColor: _ytSurface,
+                          child: CustomScrollView(
                           slivers: [
                             // ヘッダー (スマホサイズのみ表示)
                             if (!isWideScreen)
@@ -710,12 +742,55 @@ class _SubscriptionsScreenState extends State<SubscriptionsScreen> {
                             const SliverToBoxAdapter(child: SizedBox(height: 80)),
                           ],
                         ),
+                        ), // RefreshIndicator
             ),
           ],
         ),
       ),
       // ボトムナビゲーション
       bottomNavigationBar: const AppBottomNavigationBar(currentIndex: 3),
+    );
+  }
+
+  /// スケルトンビュー（初回ロード中に表示）
+  Widget _buildSkeletonView() {
+    return Container(
+      color: const Color(0xFF0F0F0F),
+      child: CustomScrollView(
+        physics: const NeverScrollableScrollPhysics(),
+        slivers: [
+          SliverAppBar(
+            floating: true,
+            backgroundColor: const Color(0xFF0F0F0F).withOpacity(0.95),
+            elevation: 0,
+            titleSpacing: 0,
+            leadingWidth: 0,
+            leading: const SizedBox.shrink(),
+            automaticallyImplyLeading: false,
+            title: Padding(
+              padding: const EdgeInsets.only(left: 12),
+              child: Row(
+                children: [
+                  Icon(Icons.subscriptions, color: _ytRed, size: 28),
+                  const SizedBox(width: 8),
+                  const Text(
+                    '登録チャンネル',
+                    style: TextStyle(
+                      color: Colors.white,
+                      fontWeight: FontWeight.bold,
+                      fontSize: 20,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+          const SkeletonSliverList(
+            itemBuilder: SkeletonVideoCardSmall.new,
+            itemCount: 4,
+          ),
+        ],
+      ),
     );
   }
 

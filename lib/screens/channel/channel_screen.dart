@@ -2,8 +2,10 @@ import 'package:flutter/material.dart';
 import '../../models/user_profile.dart';
 import '../../models/video.dart';
 import '../../models/channel_stats.dart';
+import '../../services/cache_service.dart';
 import '../../services/supabase_service.dart';
 import '../../services/youtube_service.dart';
+import '../../widgets/skeleton_widgets.dart';
 
 /// チャンネル画面
 /// 
@@ -43,9 +45,32 @@ class _ChannelScreenState extends State<ChannelScreen> {
   }
 
   /// チャンネルデータを読み込む
-  Future<void> _loadChannelData() async {
+  Future<void> _loadChannelData({bool isRefresh = false}) async {
     if (!mounted) return;
-    
+
+    // ── キャッシュ読み込み（初回表示のみ）──
+    if (!isRefresh) {
+      final cacheKey = CacheKeys.channelData(widget.channelId);
+      final cached = CacheService.instance
+          .get<Map<String, dynamic>>(cacheKey);
+      if (cached != null) {
+        final profile = cached['profile'] as UserProfile;
+        final videos = cached['videos'] as List<Video>;
+        final stats = cached['stats'] as ChannelStats;
+        final isSubscribed = cached['isSubscribed'] as bool;
+        if (mounted) {
+          setState(() {
+            _channelProfile = profile;
+            _videos = videos;
+            _stats = stats;
+            _isSubscribed = isSubscribed;
+            _isLoading = false;
+          });
+        }
+        return;
+      }
+    }
+
     setState(() {
       _isLoading = true;
       _errorMessage = null;
@@ -90,6 +115,17 @@ class _ChannelScreenState extends State<ChannelScreen> {
       final isSubscribed =
           await SupabaseService.instance.isSubscribed(widget.channelId);
 
+      // キャッシュに保存
+      CacheService.instance.set<Map<String, dynamic>>(
+        CacheKeys.channelData(widget.channelId),
+        {
+          'profile': profile,
+          'videos': videos,
+          'stats': stats,
+          'isSubscribed': isSubscribed,
+        },
+      );
+
       if (mounted) {
         setState(() {
           _channelProfile = profile;
@@ -119,8 +155,11 @@ class _ChannelScreenState extends State<ChannelScreen> {
         await SupabaseService.instance.subscribeToChannel(widget.channelId);
       }
 
-      // 登録状態を更新
-      await _loadChannelData();
+      // キャッシュを無効化して再読み込み
+      CacheService.instance.invalidate(CacheKeys.channelData(widget.channelId));
+      CacheService.instance.invalidate(CacheKeys.subscribedChannelIds);
+      CacheService.instance.invalidate(CacheKeys.subscriptionVideos);
+      await _loadChannelData(isRefresh: true);
 
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
@@ -266,6 +305,34 @@ class _ChannelScreenState extends State<ChannelScreen> {
     );
   }
 
+  Widget _buildSkeletonView() {
+    return CustomScrollView(
+      physics: const NeverScrollableScrollPhysics(),
+      slivers: [
+        SliverAppBar(
+          floating: true,
+          backgroundColor: _ytBackground,
+          elevation: 0,
+          leading: IconButton(
+            icon: Icon(Icons.arrow_back, color: _textWhite),
+            onPressed: () => Navigator.of(context).pop(),
+          ),
+        ),
+        const SliverToBoxAdapter(child: SkeletonChannelHeader()),
+        SliverToBoxAdapter(
+          child: Container(
+            height: 48,
+            color: _ytBackground,
+          ),
+        ),
+        const SkeletonSliverList(
+          itemBuilder: SkeletonVideoCardSmall.new,
+          itemCount: 4,
+        ),
+      ],
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final currentUserId = SupabaseService.instance.currentUser?.id;
@@ -275,7 +342,7 @@ class _ChannelScreenState extends State<ChannelScreen> {
       backgroundColor: _ytBackground,
       body: SafeArea(
         child: _isLoading
-            ? Center(child: CircularProgressIndicator(color: _ytRed))
+            ? _buildSkeletonView()
             : _errorMessage != null
                 ? Center(
                     child: Column(
@@ -295,7 +362,11 @@ class _ChannelScreenState extends State<ChannelScreen> {
                       ],
                     ),
                   )
-                : CustomScrollView(
+                : RefreshIndicator(
+                    onRefresh: () => _loadChannelData(isRefresh: true),
+                    color: _ytRed,
+                    backgroundColor: _ytSurface,
+                    child: CustomScrollView(
                     slivers: [
                       // ヘッダー
                       SliverAppBar(
@@ -508,6 +579,7 @@ class _ChannelScreenState extends State<ChannelScreen> {
                       const SliverToBoxAdapter(child: SizedBox(height: 80)),
                     ],
                   ),
+                  ), // RefreshIndicator
       ),
     );
   }
