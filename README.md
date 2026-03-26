@@ -21,9 +21,10 @@
 
 - **フロントエンド**: Flutter 3.10.1+ (Dart)
 - **バックエンド/DB**: Supabase
-- **認証**: Supabase Auth (メールアドレス・パスワード)
+- **認証**: Supabase Auth (メールアドレス・パスワード + Discord OAuth)
 - **ストレージ**: Supabase Storage (アバター画像)
 - **対応プラットフォーム**: Android、iOS、Web
+- **WebデプロイURL**: https://saba-videos.okasis.win
 
 ## セットアップ
 
@@ -66,6 +67,9 @@ SUPABASE_ANON_KEY=your-anon-key-here
 
 # 共有パスワード（仲間内で共有）
 SHARED_PASSWORD=your-shared-password
+
+# Discord認証（指定サーバーのGuild ID）
+DISCORD_GUILD_ID=your-discord-guild-id
 ```
 
 ⚠️ **重要**: `.env` ファイルは `.gitignore` に含まれており、Gitで追跡されません。チーム内で安全に共有してください。
@@ -429,7 +433,19 @@ lib/
 
 ## バージョン履歴
 
-### v1.6.0 (2026-03-15) - 最新版
+### v1.7.0 (2026-03-27) - 最新版
+- **Discordログイン 全問題修正**
+  - 🔴 **レースコンディション修正**: ギルド検証完了まで HomeScreen を表示しないよう AuthWrapper を改修
+  - 🔴 **ギルド検証の永続化**: 検証結果を `profiles.discord_guild_verified` に保存し、セッション復帰時も DB 参照で検証（`providerToken` null 問題の解消）
+  - 🔴 **フェイルクローズ化**: `DISCORD_GUILD_ID` 未設定時はログインを拒否（従来はフェイルオープン）
+  - 🔴 **モバイル Deep Link 修正**: `AndroidManifest.xml` / `Info.plist` にカスタムURLスキーム (`io.supabase.sabavideos://`) を追加し、Discord OAuth後に localhost に飛ばされるバグを修正
+  - 🔴 **プラットフォーム別 redirectTo 設定**: Web は `Uri.base.origin`、モバイルは `io.supabase.sabavideos://login-callback` を自動選択
+  - 🟡 **Guild ID 未設定時ボタン非表示**: `DiscordAuthService.isConfigured` が false の場合、Discordログインボタンとセパレーターを非表示
+  - 🟡 **エラー画面 UX 改善**: エラー画面の「ログイン画面に戻る」が正しく機能するよう状態管理を修正
+  - 新規ファイル: `discord_guild_migration.sql`（profiles テーブルに検証フラグ追加）
+  - 新規ファイル: `DISCORD_SETUP_GUIDE.md`（Supabase ダッシュボード設定手順）
+
+### v1.6.0 (2026-03-15)
 - **プレイリスト機能を実装**
   - `playlists` / `playlist_videos` テーブル追加（`playlist_migration.sql`）
   - `lib/models/playlist.dart`: `Playlist` / `PlaylistWithMeta` モデル

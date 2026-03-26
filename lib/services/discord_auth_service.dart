@@ -9,9 +9,14 @@ import 'supabase_service.dart';
 ///
 /// 特定のDiscordサーバーに参加しているユーザーのみ
 /// ログイン・新規登録を許可します。
+/// ギルド検証結果はDBに永続化し、セッション復帰時にも検証可能です。
 class DiscordAuthService {
   static DiscordAuthService? _instance;
   static String? _guildId;
+
+  /// モバイルアプリ用のカスタムURLスキーム
+  static const String _mobileCallbackScheme = 'io.supabase.sabavideos';
+  static const String _mobileCallbackUrl = '$_mobileCallbackScheme://login-callback';
 
   DiscordAuthService._();
 
@@ -30,7 +35,7 @@ class DiscordAuthService {
       }
     } else {
       if (kDebugMode) {
-        debugPrint('✅ Discord Auth Service initialized (Guild ID: $_guildId)');
+        debugPrint('✅ Discord Auth Service initialized');
       }
     }
   }
@@ -41,7 +46,7 @@ class DiscordAuthService {
   /// Discord OAuthでサインインを開始
   ///
   /// Supabaseの組み込みOAuth機能を使用して、Discord認証フローを開始します。
-  /// Web環境ではリダイレクト方式を使用します。
+  /// プラットフォームに応じて適切なリダイレクトURLを設定します。
   ///
   /// Throws:
   ///   - [Exception] Guild IDが設定されていない場合
@@ -56,12 +61,19 @@ class DiscordAuthService {
         debugPrint('🔐 Starting Discord OAuth flow...');
       }
 
+      // プラットフォームに応じたリダイレクトURLを設定
+      final redirectUrl = _getRedirectUrl();
+
+      if (kDebugMode) {
+        debugPrint('🔗 Redirect URL: $redirectUrl');
+      }
+
       // Supabaseの組み込みDiscord OAuth を使用
       // guilds スコープを追加して、サーバーメンバーシップを確認できるようにする
       await SupabaseService.instance.client.auth.signInWithOAuth(
         OAuthProvider.discord,
         scopes: 'identify email guilds',
-        redirectTo: kIsWeb ? _getWebRedirectUrl() : null,
+        redirectTo: redirectUrl,
       );
 
       if (kDebugMode) {
@@ -88,10 +100,11 @@ class DiscordAuthService {
   ///   - [Exception] メンバーシップ確認に失敗した場合
   Future<bool> verifyGuildMembership(Session session) async {
     if (!isConfigured) {
+      // フェイルクローズ: Guild ID未設定ならログイン拒否
       if (kDebugMode) {
-        debugPrint('⚠️ Guild ID not configured, skipping membership check');
+        debugPrint('❌ Guild ID not configured, rejecting login (fail-closed)');
       }
-      return true; // Guild IDが未設定なら検証をスキップ
+      return false;
     }
 
     try {
@@ -119,7 +132,7 @@ class DiscordAuthService {
 
       if (response.statusCode != 200) {
         if (kDebugMode) {
-          debugPrint('❌ Discord API error: ${response.statusCode} ${response.body}');
+          debugPrint('❌ Discord API error: ${response.statusCode}');
         }
         throw Exception('Discordサーバー情報の取得に失敗しました');
       }
@@ -133,7 +146,6 @@ class DiscordAuthService {
         debugPrint(isMember
             ? '✅ User is a member of the required Discord server'
             : '❌ User is NOT a member of the required Discord server');
-        debugPrint('   User guilds: ${guilds.map((g) => '${g['name']} (${g['id']})').join(', ')}');
       }
 
       return isMember;
@@ -142,6 +154,66 @@ class DiscordAuthService {
         debugPrint('❌ Guild membership verification failed: $e');
       }
       rethrow;
+    }
+  }
+
+  /// DBに保存されたギルド検証済みフラグを確認
+  ///
+  /// セッション復帰時（providerTokenなし）にDBから検証状態を取得します。
+  ///
+  /// [userId] 確認するユーザーID
+  ///
+  /// Returns: DB上でギルド検証済みの場合true
+  Future<bool> checkStoredGuildVerification(String userId) async {
+    try {
+      final result = await SupabaseService.instance.client
+          .from('profiles')
+          .select('discord_guild_verified')
+          .eq('id', userId)
+          .maybeSingle();
+
+      if (result == null) {
+        return false;
+      }
+
+      final verified = result['discord_guild_verified'] as bool? ?? false;
+
+      if (kDebugMode) {
+        debugPrint(verified
+            ? '✅ Guild verification found in DB for user: $userId'
+            : '❌ No guild verification in DB for user: $userId');
+      }
+
+      return verified;
+    } catch (e) {
+      if (kDebugMode) {
+        debugPrint('⚠️ Failed to check stored guild verification: $e');
+      }
+      return false;
+    }
+  }
+
+  /// ギルド検証結果をDBに保存
+  ///
+  /// [userId] 保存対象のユーザーID
+  /// [verified] 検証結果
+  Future<void> _saveGuildVerification(String userId, bool verified) async {
+    try {
+      await SupabaseService.instance.client
+          .from('profiles')
+          .update({
+        'discord_guild_verified': verified,
+        'discord_guild_verified_at': DateTime.now().toUtc().toIso8601String(),
+      }).eq('id', userId);
+
+      if (kDebugMode) {
+        debugPrint('✅ Guild verification saved to DB: verified=$verified');
+      }
+    } catch (e) {
+      if (kDebugMode) {
+        debugPrint('⚠️ Failed to save guild verification: $e');
+      }
+      // 保存失敗してもログインフロー自体は継続
     }
   }
 
@@ -160,6 +232,8 @@ class DiscordAuthService {
         if (kDebugMode) {
           debugPrint('🚫 User is not a member of the required server. Signing out...');
         }
+        // 検証失敗をDBに記録
+        await _saveGuildVerification(session.user.id, false);
         await SupabaseService.instance.signOut();
         return false;
       }
@@ -167,6 +241,9 @@ class DiscordAuthService {
       // メンバーの場合、プロフィールが存在するか確認して作成
       final user = session.user;
       await _ensureDiscordProfileExists(user);
+
+      // 検証成功をDBに保存
+      await _saveGuildVerification(user.id, true);
 
       return true;
     } catch (e) {
@@ -195,7 +272,7 @@ class DiscordAuthService {
 
       if (existingProfile != null) {
         if (kDebugMode) {
-          debugPrint('ℹ️ Profile already exists for Discord user: ${user.id}');
+          debugPrint('ℹ️ Profile already exists for Discord user');
         }
         return;
       }
@@ -219,11 +296,11 @@ class DiscordAuthService {
       await client.from('profiles').insert({
         'id': user.id,
         'username': defaultUsername,
+        'discord_guild_verified': false,
       });
 
       if (kDebugMode) {
-        debugPrint('✅ Discord profile created for user: ${user.id}');
-        debugPrint('   Username: $defaultUsername');
+        debugPrint('✅ Discord profile created');
       }
     } catch (e) {
       if (kDebugMode) {
@@ -262,11 +339,15 @@ class DiscordAuthService {
     return 'user_${user.id.substring(0, 8)}';
   }
 
-  /// Web環境でのリダイレクトURLを取得
-  String _getWebRedirectUrl() {
-    // Webの場合、現在のURLをリダイレクト先として使用
-    // Cloudflare Pagesにデプロイされている場合のURLを返す
-    return Uri.base.origin;
+  /// プラットフォームに応じたリダイレクトURLを取得
+  String? _getRedirectUrl() {
+    if (kIsWeb) {
+      // Web: 現在のoriginをリダイレクト先として使用
+      return Uri.base.origin;
+    } else {
+      // モバイル: カスタムURLスキームを使用
+      return _mobileCallbackUrl;
+    }
   }
 
   /// サービスをリセット（テスト用）
