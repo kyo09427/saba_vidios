@@ -204,7 +204,7 @@ class _ChannelScreenState extends State<ChannelScreen>
           SnackBar(
             content: Text(
                 _isSubscribed ? 'チャンネル登録しました！' : 'チャンネル登録を解除しました'),
-            backgroundColor: _isSubscribed ? Colors.grey : Colors.green,
+            backgroundColor: _isSubscribed ? Colors.green : Colors.grey,
             duration: const Duration(seconds: 2),
           ),
         );
