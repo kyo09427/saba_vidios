@@ -485,18 +485,6 @@ class _MyPageScreenState extends State<MyPageScreen> {
                           },
                           iconColor: Colors.purple,
                         ),
-                        const Divider(height: 1),
-                        _buildSwitchTile(
-                          icon: Icons.play_circle,
-                          title: '自動再生',
-                          value: _autoPlayEnabled,
-                          onChanged: (value) {
-                            setState(() {
-                              _autoPlayEnabled = value;
-                            });
-                          },
-                          iconColor: Colors.green,
-                        ),
                       ],
                     ),
                   ),
@@ -602,7 +590,7 @@ class _MyPageScreenState extends State<MyPageScreen> {
                                         style: TextStyle(fontWeight: FontWeight.bold),
                                       ),
                                       SizedBox(height: 4),
-                                      Text('ホーム画面の「+」ボタンから投稿できます。'),
+                                      Text('画面下部の「+」ボタンから投稿できます。'),
                                       SizedBox(height: 12),
                                       Text(
                                         '👀 動画の視聴',
@@ -635,12 +623,12 @@ class _MyPageScreenState extends State<MyPageScreen> {
                         _buildMenuTile(
                           icon: Icons.info_outline,
                           title: 'アプリについて',
-                          subtitle: 'バージョン 1.1.0',
+                          subtitle: 'バージョン 1.8.0',
                           onTap: () {
                             showAboutDialog(
                               context: context,
                               applicationName: 'サバの動画',
-                              applicationVersion: '1.1.0',
+                              applicationVersion: '1.8.0',
                               applicationIcon: const Icon(
                                 Icons.video_library,
                                 size: 48,

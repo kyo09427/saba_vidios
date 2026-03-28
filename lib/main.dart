@@ -86,8 +86,12 @@ class AuthWrapper extends StatefulWidget {
 
 class _AuthWrapperState extends State<AuthWrapper> {
   bool _isInitialized = false;
-  bool _isVerifyingGuild = false;
   String? _errorMessage;
+
+  /// Discordギルド検証の状態管理
+  /// null: 検証不要 or 未開始, true: 検証中, false: 検証完了
+  bool? _isVerifyingGuild;
+  bool _guildVerified = false;
   String? _guildErrorMessage;
 
   @override
@@ -111,16 +115,19 @@ class _AuthWrapperState extends State<AuthWrapper> {
     }
   }
 
-  /// Discordログイン後のサーバーメンバーシップ検証
-  Future<void> _verifyDiscordMembership(session) async {
+  /// Discordログインユーザーのサーバーメンバーシップ検証
+  ///
+  /// 初回ログイン時: providerTokenを使ってDiscord APIで検証 → DB保存
+  /// セッション復帰時: DBに保存された検証結果を参照
+  Future<void> _verifyDiscordMembership(Session session) async {
     // Discord OAuthでのログインかどうかを確認
-    final provider = session.user?.appMetadata['provider'];
+    final provider = session.user.appMetadata['provider'];
     if (provider != 'discord') {
-      return; // Discord以外のログインはスキップ
-    }
-
-    // プロバイダートークンがない場合はスキップ（既存セッションの復帰時）
-    if (session.providerToken == null) {
+      // Discord以外のログインは検証不要
+      setState(() {
+        _guildVerified = true;
+        _isVerifyingGuild = false;
+      });
       return;
     }
 
@@ -130,20 +137,55 @@ class _AuthWrapperState extends State<AuthWrapper> {
     });
 
     try {
-      final success = await DiscordAuthService.instance.handleDiscordCallback(session);
-      if (!success) {
-        setState(() {
-          _guildErrorMessage = '指定のDiscordサーバーに参加していないため、\nログインできません。';
-        });
+      if (session.providerToken != null) {
+        // === 初回ログイン: providerTokenがある場合はAPI検証 ===
+        final success = await DiscordAuthService.instance.handleDiscordCallback(session);
+        if (mounted) {
+          if (success) {
+            setState(() {
+              _guildVerified = true;
+              _isVerifyingGuild = false;
+            });
+          } else {
+            setState(() {
+              _guildVerified = false;
+              _isVerifyingGuild = false;
+              _guildErrorMessage = '指定のDiscordサーバーに参加していないため、\nログインできません。';
+            });
+          }
+        }
+      } else {
+        // === セッション復帰: providerTokenがない場合はDB参照 ===
+        final isVerifiedInDb = await DiscordAuthService.instance
+            .checkStoredGuildVerification(session.user.id);
+
+        if (mounted) {
+          if (isVerifiedInDb) {
+            setState(() {
+              _guildVerified = true;
+              _isVerifyingGuild = false;
+            });
+          } else {
+            // DB上でも検証されていない場合はサインアウト
+            await SupabaseService.instance.signOut();
+            setState(() {
+              _guildVerified = false;
+              _isVerifyingGuild = false;
+              _guildErrorMessage = 'Discordサーバーのメンバーシップが確認できません。\n再度ログインしてください。';
+            });
+          }
+        }
       }
     } catch (e) {
-      setState(() {
-        _guildErrorMessage = 'Discordサーバーの確認に失敗しました。\n再度お試しください。';
-      });
-    } finally {
       if (mounted) {
+        // エラー発生時もサインアウト
+        try {
+          await SupabaseService.instance.signOut();
+        } catch (_) {}
         setState(() {
           _isVerifyingGuild = false;
+          _guildVerified = false;
+          _guildErrorMessage = 'Discordサーバーの確認に失敗しました。\n再度お試しください。';
         });
       }
     }
@@ -151,6 +193,7 @@ class _AuthWrapperState extends State<AuthWrapper> {
 
   @override
   Widget build(BuildContext context) {
+    // --- 初期化中 ---
     if (!_isInitialized) {
       return const Scaffold(
         body: Center(
@@ -166,6 +209,7 @@ class _AuthWrapperState extends State<AuthWrapper> {
       );
     }
 
+    // --- 初期化エラー ---
     if (_errorMessage != null) {
       return Scaffold(
         body: Center(
@@ -203,8 +247,8 @@ class _AuthWrapperState extends State<AuthWrapper> {
       );
     }
 
-    // サーバーメンバーシップ検証中
-    if (_isVerifyingGuild) {
+    // --- ギルド検証中 ---
+    if (_isVerifyingGuild == true) {
       return const Scaffold(
         body: Center(
           child: Column(
@@ -219,7 +263,7 @@ class _AuthWrapperState extends State<AuthWrapper> {
       );
     }
 
-    // サーバーメンバーシップエラー
+    // --- ギルド検証エラー ---
     if (_guildErrorMessage != null) {
       return Scaffold(
         body: Center(
@@ -244,6 +288,8 @@ class _AuthWrapperState extends State<AuthWrapper> {
                   onPressed: () {
                     setState(() {
                       _guildErrorMessage = null;
+                      _guildVerified = false;
+                      _isVerifyingGuild = null;
                     });
                   },
                   child: const Text('ログイン画面に戻る'),
@@ -255,6 +301,7 @@ class _AuthWrapperState extends State<AuthWrapper> {
       );
     }
 
+    // --- 認証状態の監視 ---
     return StreamBuilder(
       stream: SupabaseService.instance.authStateChanges,
       builder: (context, snapshot) {
@@ -304,21 +351,50 @@ class _AuthWrapperState extends State<AuthWrapper> {
         final session = snapshot.hasData ? snapshot.data!.session : null;
 
         if (session != null) {
-          // Discord OAuthでの新規ログイン時にサーバーメンバーシップを検証
-          final authEvent = snapshot.data!.event;
-          if (authEvent == AuthChangeEvent.signedIn &&
-              session.user.appMetadata['provider'] == 'discord' &&
-              session.providerToken != null) {
-            // 非同期でギルドメンバーシップを検証
+          final isDiscordUser = session.user.appMetadata['provider'] == 'discord';
+
+          if (isDiscordUser) {
+            // Discordユーザー: ギルド検証が必要
+            if (!_guildVerified) {
+              // まだ検証されていない場合、検証を開始
+              if (_isVerifyingGuild != true) {
+                WidgetsBinding.instance.addPostFrameCallback((_) {
+                  _verifyDiscordMembership(session);
+                });
+              }
+              // 検証完了まではローディングを表示（HomeScreenは見せない）
+              return const Scaffold(
+                body: Center(
+                  child: Column(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      CircularProgressIndicator(),
+                      SizedBox(height: 16),
+                      Text('Discordサーバーを確認中...'),
+                    ],
+                  ),
+                ),
+              );
+            }
+            // 検証済み → ホーム画面
+            return const HomeScreen();
+          } else {
+            // メール+パスワードユーザー: 検証不要でホーム画面
+            return const HomeScreen();
+          }
+        } else {
+          // 未ログイン → ログイン画面（状態リセット）
+          if (_guildVerified || _isVerifyingGuild != null) {
             WidgetsBinding.instance.addPostFrameCallback((_) {
-              _verifyDiscordMembership(session);
+              if (mounted) {
+                setState(() {
+                  _guildVerified = false;
+                  _isVerifyingGuild = null;
+                  _guildErrorMessage = null;
+                });
+              }
             });
           }
-
-          // ログイン済み → ホーム画面
-          return const HomeScreen();
-        } else {
-          // 未ログイン → ログイン画面
           return const LoginScreen();
         }
       },

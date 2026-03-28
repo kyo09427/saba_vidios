@@ -256,53 +256,57 @@ class _LoginScreenState extends State<LoginScreen> {
                           style: TextStyle(fontSize: 16),
                         ),
                 ),
-                const SizedBox(height: 24),
 
-                // セパレーター「または」
-                Row(
-                  children: [
-                    Expanded(child: Divider(color: Colors.grey[400])),
-                    Padding(
-                      padding: const EdgeInsets.symmetric(horizontal: 16),
-                      child: Text(
-                        'または',
-                        style: TextStyle(
-                          color: Colors.grey[600],
-                          fontSize: 14,
+                // Discord認証が設定されている場合のみ表示
+                if (DiscordAuthService.instance.isConfigured) ...[
+                  const SizedBox(height: 24),
+
+                  // セパレーター「または」
+                  Row(
+                    children: [
+                      Expanded(child: Divider(color: Colors.grey[400])),
+                      Padding(
+                        padding: const EdgeInsets.symmetric(horizontal: 16),
+                        child: Text(
+                          'または',
+                          style: TextStyle(
+                            color: Colors.grey[600],
+                            fontSize: 14,
+                          ),
                         ),
                       ),
-                    ),
-                    Expanded(child: Divider(color: Colors.grey[400])),
-                  ],
-                ),
-                const SizedBox(height: 24),
-
-                // Discordでログインボタン
-                ElevatedButton.icon(
-                  onPressed: isAnyLoading ? null : _handleDiscordLogin,
-                  style: ElevatedButton.styleFrom(
-                    padding: const EdgeInsets.symmetric(vertical: 16),
-                    backgroundColor: const Color(0xFF5865F2), // Discord brand color
-                    foregroundColor: Colors.white,
-                    disabledBackgroundColor: Colors.grey[300],
+                      Expanded(child: Divider(color: Colors.grey[400])),
+                    ],
                   ),
-                  icon: _isDiscordLoading
-                      ? const SizedBox(
-                          height: 20,
-                          width: 20,
-                          child: CircularProgressIndicator(
-                            strokeWidth: 2,
-                            valueColor: AlwaysStoppedAnimation<Color>(Colors.white),
+                  const SizedBox(height: 24),
+
+                  // Discordでログインボタン
+                  ElevatedButton.icon(
+                    onPressed: isAnyLoading ? null : _handleDiscordLogin,
+                    style: ElevatedButton.styleFrom(
+                      padding: const EdgeInsets.symmetric(vertical: 16),
+                      backgroundColor: const Color(0xFF5865F2), // Discord brand color
+                      foregroundColor: Colors.white,
+                      disabledBackgroundColor: Colors.grey[300],
+                    ),
+                    icon: _isDiscordLoading
+                        ? const SizedBox(
+                            height: 20,
+                            width: 20,
+                            child: CircularProgressIndicator(
+                              strokeWidth: 2,
+                              valueColor: AlwaysStoppedAnimation<Color>(Colors.white),
+                            ),
+                          )
+                        : const Icon(Icons.discord, size: 24),
+                    label: _isDiscordLoading
+                        ? const Text('')
+                        : const Text(
+                            'Discordでログイン',
+                            style: TextStyle(fontSize: 16),
                           ),
-                        )
-                      : const Icon(Icons.discord, size: 24),
-                  label: _isDiscordLoading
-                      ? const Text('')
-                      : const Text(
-                          'Discordでログイン',
-                          style: TextStyle(fontSize: 16),
-                        ),
-                ),
+                  ),
+                ],
                 const SizedBox(height: 16),
 
                 // 新規登録へのリンク

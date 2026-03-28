@@ -21,9 +21,10 @@
 
 - **フロントエンド**: Flutter 3.10.1+ (Dart)
 - **バックエンド/DB**: Supabase
-- **認証**: Supabase Auth (メールアドレス・パスワード)
+- **認証**: Supabase Auth (メールアドレス・パスワード + Discord OAuth)
 - **ストレージ**: Supabase Storage (アバター画像)
 - **対応プラットフォーム**: Android、iOS、Web
+- **WebデプロイURL**: https://saba-videos.okasis.win
 
 ## セットアップ
 
@@ -66,6 +67,9 @@ SUPABASE_ANON_KEY=your-anon-key-here
 
 # 共有パスワード（仲間内で共有）
 SHARED_PASSWORD=your-shared-password
+
+# Discord認証（指定サーバーのGuild ID）
+DISCORD_GUILD_ID=your-discord-guild-id
 ```
 
 ⚠️ **重要**: `.env` ファイルは `.gitignore` に含まれており、Gitで追跡されません。チーム内で安全に共有してください。
@@ -429,7 +433,28 @@ lib/
 
 ## バージョン履歴
 
-### v1.6.0 (2026-03-15) - 最新版
+### v1.8.0 (2026-03-27) - 最新版
+- **PC版検索機能・UIの堅牢性向上と動画再生時間対応**
+  - 🔴 **PC版検索バーのクラッシュ修正**: `SearchAnchor`のドロップダウンが未展開の状態でEnterを押下すると白画面でクラッシュする問題を、`isOpen`の事前チェックとフォーカス解除で修正
+  - 🟡 **PC版検索バーのUX改善**: 検索窓のクリック（`onTap`）や文字入力（`onChanged`）に連動して検索履歴ドロップダウンが自然に開くように挙動を最適化
+  - 🔴 **検索履歴での重大なエラー防止**: `SharedPreferences`が返す変更不可リスト（UnmodifiableListView）を直接操作した際に発生する`UnsupportedError`を回避するため、`.toList()`で安全なコピーを操作するよう堅牢性を向上
+  - 🟢 **動画再生時間の表示**: サムネイル画像右下に、YouTube URLから取得した動画の再生時間（duration）バッジを表示するよう対応（チャンネル画面・登録チャンネル画面）
+  - 🟢 **Web版の仕様追加**: Webブラウザ上ではCORSの制約で再生時間の自動取得ができないため、動画投稿画面にWeb版専用の「手動入力」案内を表示
+  - 🟢 **登録チャンネルの新着フィルタ変更**: 「新しい動画」の抽出基準を「24時間以内」から「7日（1週間）以内」へ拡大表示するように変更
+
+### v1.7.0 (2026-03-27)
+- **Discordログイン 全問題修正**
+  - 🔴 **レースコンディション修正**: ギルド検証完了まで HomeScreen を表示しないよう AuthWrapper を改修
+  - 🔴 **ギルド検証の永続化**: 検証結果を `profiles.discord_guild_verified` に保存し、セッション復帰時も DB 参照で検証（`providerToken` null 問題の解消）
+  - 🔴 **フェイルクローズ化**: `DISCORD_GUILD_ID` 未設定時はログインを拒否（従来はフェイルオープン）
+  - 🔴 **モバイル Deep Link 修正**: `AndroidManifest.xml` / `Info.plist` にカスタムURLスキーム (`io.supabase.sabavideos://`) を追加し、Discord OAuth後に localhost に飛ばされるバグを修正
+  - 🔴 **プラットフォーム別 redirectTo 設定**: Web は `Uri.base.origin`、モバイルは `io.supabase.sabavideos://login-callback` を自動選択
+  - 🟡 **Guild ID 未設定時ボタン非表示**: `DiscordAuthService.isConfigured` が false の場合、Discordログインボタンとセパレーターを非表示
+  - 🟡 **エラー画面 UX 改善**: エラー画面の「ログイン画面に戻る」が正しく機能するよう状態管理を修正
+  - 新規ファイル: `discord_guild_migration.sql`（profiles テーブルに検証フラグ追加）
+  - 新規ファイル: `DISCORD_SETUP_GUIDE.md`（Supabase ダッシュボード設定手順）
+
+### v1.6.0 (2026-03-15)
 - **プレイリスト機能を実装**
   - `playlists` / `playlist_videos` テーブル追加（`playlist_migration.sql`）
   - `lib/models/playlist.dart`: `Playlist` / `PlaylistWithMeta` モデル
