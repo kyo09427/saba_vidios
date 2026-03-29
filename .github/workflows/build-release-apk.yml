@@ -59,13 +59,22 @@ jobs:
           GOOGLE_SERVICES_JSON_B64: ${{ secrets.GOOGLE_SERVICES_JSON_B64 }}
         run: |
           python3 - <<'EOF'
-          import base64, os, json, re
+          import base64, os, json, re, sys
           raw = base64.b64decode(os.environ['GOOGLE_SERVICES_JSON_B64'].strip())
-          content = raw.decode('utf-8-sig')
+          # google-services.json は純粋な ASCII のはずなので非 ASCII バイトを除去する
+          non_ascii = [(i, b) for i, b in enumerate(raw) if b > 127]
+          if non_ascii:
+              print(f'Warning: {len(non_ascii)} non-ASCII byte(s) found (e.g. pos={non_ascii[0][0]}, 0x{non_ascii[0][1]:02x}), stripping them')
+              raw = bytes(b for b in raw if b <= 127)
+          content = raw.decode('ascii')
           content = content.replace('\r\n', '\n').replace('\r', '\n')
           # 不正なJSONエスケープシーケンス（例: \: \- \_）を修正する
           content = re.sub(r'\\([^"\\/bfnrtu])', lambda m: m.group(1), content)
-          json.loads(content)  # バリデーション
+          try:
+              json.loads(content)
+          except json.JSONDecodeError as e:
+              print(f'JSON validation failed: {e}')
+              sys.exit(1)
           with open('android/app/google-services.json', 'w', encoding='utf-8') as f:
               f.write(content)
           print('google-services.json created successfully')
