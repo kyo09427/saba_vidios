@@ -11,12 +11,14 @@ class NotificationsScreen extends StatefulWidget {
 }
 
 class _NotificationsScreenState extends State<NotificationsScreen> {
-  static const Color _background = Color(0xFF0F0F0F);
-  static const Color _surface = Color(0xFF272727);
-  static const Color _surfaceUnread = Color(0xFF1E2A3A);
-  static const Color _textWhite = Colors.white;
-  static const Color _textGray = Color(0xFFAAAAAA);
   static const Color _ytRed = Color(0xFFF20D0D);
+  Color get _background => Theme.of(context).scaffoldBackgroundColor;
+  Color get _surface => Theme.of(context).colorScheme.surface;
+  Color get _surfaceUnread => Theme.of(context).brightness == Brightness.dark
+      ? const Color(0xFF1E2A3A)
+      : const Color(0xFFE3F2FD);
+  Color get _textWhite => Theme.of(context).colorScheme.onSurface;
+  Color get _textGray => Theme.of(context).colorScheme.onSurfaceVariant;
 
   List<AppNotification> _notifications = [];
   bool _isLoading = true;
@@ -97,7 +99,7 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
         backgroundColor: _background,
         foregroundColor: _textWhite,
         elevation: 0,
-        title: const Text(
+        title: Text(
           '通知',
           style: TextStyle(
             color: _textWhite,
@@ -109,7 +111,7 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
           if (hasUnread)
             TextButton(
               onPressed: _markAllAsRead,
-              child: const Text(
+              child: Text(
                 'すべて既読',
                 style: TextStyle(color: _textGray, fontSize: 13),
               ),
@@ -117,7 +119,7 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
         ],
       ),
       body: _isLoading
-          ? const Center(child: CircularProgressIndicator(color: _ytRed))
+          ? const Center(child: CircularProgressIndicator(color: _ytRed))  // _ytRed is static const
           : RefreshIndicator(
               onRefresh: _load,
               color: _ytRed,
@@ -153,7 +155,7 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
               ),
               child: const Icon(
                 Icons.video_library_outlined,
-                color: _ytRed,
+                color: _ytRed, // static const
                 size: 22,
               ),
             ),
@@ -176,14 +178,14 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
                   const SizedBox(height: 4),
                   Text(
                     notification.body,
-                    style: const TextStyle(color: _textGray, fontSize: 13),
+                    style: TextStyle(color: _textGray, fontSize: 13),
                     maxLines: 2,
                     overflow: TextOverflow.ellipsis,
                   ),
                   const SizedBox(height: 4),
                   Text(
                     _formatRelativeTime(notification.createdAt),
-                    style: const TextStyle(color: _textGray, fontSize: 12),
+                    style: TextStyle(color: _textGray, fontSize: 12),
                   ),
                 ],
               ),
@@ -196,7 +198,7 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
                   width: 8,
                   height: 8,
                   decoration: const BoxDecoration(
-                    color: _ytRed,
+                    color: _ytRed, // static const
                     shape: BoxShape.circle,
                   ),
                 ),
@@ -209,19 +211,18 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
 
   Widget _buildEmpty() {
     return ListView(
-      children: const [
-        SizedBox(height: 120),
+      children: [
+        const SizedBox(height: 120),
         Center(
           child: Column(
             children: [
-              Icon(Icons.notifications_none_outlined,
-                  size: 72, color: _surface),
-              SizedBox(height: 16),
+              Icon(Icons.notifications_none_outlined, size: 72, color: _surface),
+              const SizedBox(height: 16),
               Text(
                 '通知はありません',
                 style: TextStyle(color: _textGray, fontSize: 15),
               ),
-              SizedBox(height: 8),
+              const SizedBox(height: 8),
               Text(
                 'チャンネルを登録すると\n新着動画の通知が届きます',
                 textAlign: TextAlign.center,

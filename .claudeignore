@@ -74,3 +74,15 @@ coverage/
 # =============================
 タイムライン（例）.html
 チャンネル画面(サンプル).html
+
+# =============================
+# 自動生成アイコン・アセット類
+# =============================
+android/app/src/main/res/mipmap-*/
+android/app/src/main/res/drawable/launch_background.xml
+ios/Runner/Assets.xcassets/AppIcon.appiconset/
+macos/Runner/Assets.xcassets/AppIcon.appiconset/
+windows/runner/resources/*.ico
+web/icons/
+web/favicon.png
+icon.png

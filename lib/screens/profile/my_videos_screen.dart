@@ -23,12 +23,12 @@ class _MyVideosScreenState extends State<MyVideosScreen> {
   bool _isLoading = true;
   String? _errorMessage;
 
-  // デザイン用カラー定義（サブスク画面と統一）
-  final Color _ytBackground = const Color(0xFF0F0F0F);
-  final Color _ytSurface = const Color(0xFF272727);
-  final Color _ytRed = const Color(0xFFF20D0D);
-  final Color _textWhite = Colors.white;
-  final Color _textGray = const Color(0xFFAAAAAA);
+  // デザイン用カラー（テーマ対応ゲッター）
+  static const Color _ytRed = Color(0xFFF20D0D);
+  Color get _ytBackground => Theme.of(context).scaffoldBackgroundColor;
+  Color get _ytSurface => Theme.of(context).colorScheme.surface;
+  Color get _textWhite => Theme.of(context).colorScheme.onSurface;
+  Color get _textGray => Theme.of(context).colorScheme.onSurfaceVariant;
 
   @override
   void initState() {
@@ -148,6 +148,7 @@ class _MyVideosScreenState extends State<MyVideosScreen> {
         video: video,
         ytBackground: _ytBackground,
         ytSurface: _ytSurface,
+        ytRed: _ytRed,
         textWhite: _textWhite,
         textGray: _textGray,
       ),
@@ -545,6 +546,7 @@ class _EditVideoSheet extends StatefulWidget {
   final Video video;
   final Color ytBackground;
   final Color ytSurface;
+  final Color ytRed;
   final Color textWhite;
   final Color textGray;
 
@@ -552,6 +554,7 @@ class _EditVideoSheet extends StatefulWidget {
     required this.video,
     required this.ytBackground,
     required this.ytSurface,
+    required this.ytRed,
     required this.textWhite,
     required this.textGray,
   });

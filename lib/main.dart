@@ -6,6 +6,7 @@ import 'firebase_options.dart';
 import 'services/supabase_service.dart';
 import 'services/discord_auth_service.dart';
 import 'services/notification_service.dart';
+import 'services/theme_service.dart';
 import 'screens/auth/login_screen.dart';
 import 'screens/home/home_screen.dart';
 
@@ -30,55 +31,103 @@ void main() async {
     debugPrint('Supabase initialization error: $e');
   }
 
+  // テーマの初期化（保存済み設定を読み込む）
+  await ThemeService.instance.initialize();
+
   runApp(const MyApp());
 }
 
-class MyApp extends StatelessWidget {
+class MyApp extends StatefulWidget {
   const MyApp({super.key});
+
+  @override
+  State<MyApp> createState() => _MyAppState();
+}
+
+class _MyAppState extends State<MyApp> {
+  @override
+  void initState() {
+    super.initState();
+    ThemeService.instance.themeMode.addListener(_onThemeChanged);
+  }
+
+  @override
+  void dispose() {
+    ThemeService.instance.themeMode.removeListener(_onThemeChanged);
+    super.dispose();
+  }
+
+  void _onThemeChanged() => setState(() {});
+
+  ThemeData _buildTheme(Brightness brightness) {
+    final isDark = brightness == Brightness.dark;
+
+    final colorScheme = ColorScheme.fromSeed(
+      seedColor: Colors.blue,
+      brightness: brightness,
+    ).copyWith(
+      // カード・コンテナ・ダイアログの背景
+      surface: isDark ? const Color(0xFF272727) : Colors.white,
+      onSurface: isDark ? Colors.white : Colors.black87,
+      onSurfaceVariant: isDark ? const Color(0xFFAAAAAA) : Colors.grey.shade600,
+      surfaceContainer: isDark ? const Color(0xFF272727) : Colors.grey.shade100,
+    );
+
+    return ThemeData(
+      colorScheme: colorScheme,
+      useMaterial3: true,
+      // Scaffold（画面）の背景色
+      scaffoldBackgroundColor: isDark ? const Color(0xFF0F0F0F) : Colors.grey.shade100,
+      // AppBar のデフォルト色
+      appBarTheme: AppBarTheme(
+        centerTitle: true,
+        elevation: 0,
+        backgroundColor: isDark ? const Color(0xFF0F0F0F) : Colors.white,
+        foregroundColor: isDark ? Colors.white : Colors.black87,
+        iconTheme: IconThemeData(color: isDark ? Colors.white : Colors.black87),
+      ),
+      // Divider の色
+      dividerColor: isDark ? const Color(0xFF3A3A3A) : Colors.grey.shade300,
+      // カードの背景色
+      cardColor: isDark ? const Color(0xFF272727) : Colors.white,
+      inputDecorationTheme: InputDecorationTheme(
+        filled: true,
+        fillColor: isDark ? Colors.grey[900] : Colors.grey[50],
+        border: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(8),
+        ),
+        enabledBorder: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(8),
+          borderSide: BorderSide(color: isDark ? Colors.grey[700]! : Colors.grey[300]!),
+        ),
+        focusedBorder: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(8),
+          borderSide: const BorderSide(color: Colors.blue, width: 2),
+        ),
+        errorBorder: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(8),
+          borderSide: const BorderSide(color: Colors.red),
+        ),
+      ),
+      elevatedButtonTheme: ElevatedButtonThemeData(
+        style: ElevatedButton.styleFrom(
+          elevation: 0,
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(8),
+          ),
+        ),
+      ),
+    );
+  }
 
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
       title: 'SabaTube',
       debugShowCheckedModeBanner: false,
-      theme: ThemeData(
-        colorScheme: ColorScheme.fromSeed(
-          seedColor: Colors.blue,
-          brightness: Brightness.light,
-        ),
-        useMaterial3: true,
-        appBarTheme: const AppBarTheme(
-          centerTitle: true,
-          elevation: 0,
-        ),
-        inputDecorationTheme: InputDecorationTheme(
-          filled: true,
-          fillColor: Colors.grey[50],
-          border: OutlineInputBorder(
-            borderRadius: BorderRadius.circular(8),
-          ),
-          enabledBorder: OutlineInputBorder(
-            borderRadius: BorderRadius.circular(8),
-            borderSide: BorderSide(color: Colors.grey[300]!),
-          ),
-          focusedBorder: OutlineInputBorder(
-            borderRadius: BorderRadius.circular(8),
-            borderSide: const BorderSide(color: Colors.blue, width: 2),
-          ),
-          errorBorder: OutlineInputBorder(
-            borderRadius: BorderRadius.circular(8),
-            borderSide: const BorderSide(color: Colors.red),
-          ),
-        ),
-        elevatedButtonTheme: ElevatedButtonThemeData(
-          style: ElevatedButton.styleFrom(
-            elevation: 0,
-            shape: RoundedRectangleBorder(
-              borderRadius: BorderRadius.circular(8),
-            ),
-          ),
-        ),
-      ),
+      theme: _buildTheme(Brightness.light),
+      darkTheme: _buildTheme(Brightness.dark),
+      themeMode: ThemeService.instance.themeMode.value,
       home: const AuthWrapper(),
     );
   }

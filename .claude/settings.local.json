@@ -1,0 +1,20 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(find /c/Users/shoul/saba_videos -name *notif* -o -name *push* -o -name *notification*)",
+      "Bash(ls:*)",
+      "Bash(xargs grep:*)",
+      "Bash(flutter pub:*)",
+      "Bash(find /c/Users/shoul -path *realtime_client-2.7.0* -name *.dart)",
+      "Bash(flutter analyze:*)",
+      "Bash(git add:*)",
+      "Bash(git commit:*)",
+      "Bash(git push:*)",
+      "Bash(python3:*)",
+      "Bash(cmd.exe /c \"powershell -Command \\\\\"[Convert]::ToBase64String\\([IO.File]::ReadAllBytes\\('lib\\\\\\\\firebase_options.dart'\\)\\)\\\\\"\")",
+      "Bash(cmd.exe /c \"powershell -Command \\\\\"[Convert]::ToBase64String\\([IO.File]::ReadAllBytes\\('lib\\\\\\\\firebase_options.dart'\\)\\)\\\\\" > b64_output.txt 2>&1 && type b64_output.txt && del b64_output.txt\")",
+      "Bash(openssl base64:*)",
+      "Bash(py:*)"
+    ]
+  }
+}

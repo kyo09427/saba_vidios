@@ -14,10 +14,10 @@ class AppBottomNavigationBar extends StatelessWidget {
     required this.currentIndex,
   });
 
-  // デザイン用カラー定義
-  static const Color _ytBackground = Color(0xFF0F0F0F);
-  static const Color _ytSurface = Color(0xFF272727);
-  static const Color _textWhite = Colors.white;
+  // デザイン用カラー（テーマから動的取得）
+  Color _ytBackground(BuildContext context) => Theme.of(context).scaffoldBackgroundColor;
+  Color _ytSurface(BuildContext context) => Theme.of(context).colorScheme.surface;
+  Color _textColor(BuildContext context) => Theme.of(context).colorScheme.onSurface;
 
   void _onItemTapped(BuildContext context, int index) {
     // 現在のページと同じ場合は何もしない
@@ -60,7 +60,8 @@ class AppBottomNavigationBar extends StatelessWidget {
     VoidCallback? onTap,
   }) {
     final isActive = index == currentIndex;
-    
+    final textColor = _textColor(context);
+
     return InkWell(
       onTap: onTap ?? () => _onItemTapped(context, index),
       child: Column(
@@ -68,14 +69,14 @@ class AppBottomNavigationBar extends StatelessWidget {
         children: [
           Icon(
             icon,
-            color: _textWhite,
+            color: textColor,
             size: 24,
           ),
           const SizedBox(height: 4),
           Text(
             label,
             style: TextStyle(
-              color: _textWhite,
+              color: textColor,
               fontSize: 10,
               fontWeight: isActive ? FontWeight.bold : FontWeight.normal,
             ),
@@ -87,10 +88,12 @@ class AppBottomNavigationBar extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final bgColor = _ytBackground(context);
+    final surfaceColor = _ytSurface(context);
     return Container(
       decoration: BoxDecoration(
-        color: _ytBackground,
-        border: Border(top: BorderSide(color: _ytSurface, width: 0.5)),
+        color: bgColor,
+        border: Border(top: BorderSide(color: surfaceColor, width: 0.5)),
       ),
       padding: EdgeInsets.only(
         top: 8,
@@ -120,10 +123,13 @@ class AppBottomNavigationBar extends StatelessWidget {
               height: 40,
               decoration: BoxDecoration(
                 shape: BoxShape.circle,
-                border: Border.all(color: Colors.white24, width: 1),
-                color: _ytSurface.withValues(alpha: 0.5),
+                border: Border.all(
+                  color: _textColor(context).withValues(alpha: 0.2),
+                  width: 1,
+                ),
+                color: _ytSurface(context).withValues(alpha: 0.5),
               ),
-              child: const Icon(Icons.add, color: Colors.white, size: 28),
+              child: Icon(Icons.add, color: _textColor(context), size: 28),
             ),
           ),
           _buildNavItem(

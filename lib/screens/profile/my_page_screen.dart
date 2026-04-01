@@ -1,9 +1,16 @@
+import 'package:firebase_messaging/firebase_messaging.dart';
 import 'package:flutter/material.dart';
+import 'package:package_info_plus/package_info_plus.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import '../../models/user_profile.dart';
+import '../../services/app_update_service.dart';
 import '../../services/cache_service.dart';
+import '../../services/notification_service.dart';
 import '../../services/profile_service.dart';
 import '../../services/supabase_service.dart';
+import '../../services/theme_service.dart';
 import '../../widgets/app_bottom_navigation_bar.dart';
+import '../../widgets/update_dialog.dart';
 import '../auth/login_screen.dart';
 import 'edit_profile_screen.dart';
 import 'my_videos_screen.dart';
@@ -32,15 +39,79 @@ class _MyPageScreenState extends State<MyPageScreen> {
   
   // 設定
   bool _notificationsEnabled = true;
-  bool _darkModeEnabled = false;
 
-  
+  // バージョン情報
+  String _currentVersion = '';
+  String _currentBuildNumber = '';
+  UpdateInfo? _latestUpdateInfo;
+
   bool _isLoading = true;
 
   @override
   void initState() {
     super.initState();
     _loadUserData();
+    _loadVersionInfo();
+    _loadNotificationSetting();
+  }
+
+  Future<void> _loadNotificationSetting() async {
+    final prefs = await SharedPreferences.getInstance();
+    if (!mounted) return;
+    setState(() {
+      _notificationsEnabled = prefs.getBool('notifications_enabled') ?? true;
+    });
+  }
+
+  Future<void> _toggleNotification(bool enabled) async {
+    setState(() {
+      _notificationsEnabled = enabled;
+    });
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setBool('notifications_enabled', enabled);
+
+    if (enabled) {
+      // 通知を有効化: FCMトークンを再取得してSupabaseに保存
+      final settings = await FirebaseMessaging.instance.requestPermission();
+      if (settings.authorizationStatus == AuthorizationStatus.authorized ||
+          settings.authorizationStatus == AuthorizationStatus.provisional) {
+        final token = await FirebaseMessaging.instance.getToken();
+        if (token != null) {
+          await NotificationService.instance.registerFcmToken(token);
+        }
+      } else {
+        // OS権限が拒否されている場合はトグルを戻す
+        if (mounted) {
+          setState(() {
+            _notificationsEnabled = false;
+          });
+          await prefs.setBool('notifications_enabled', false);
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              content: Text('通知権限が拒否されています。端末の設定から許可してください。'),
+            ),
+          );
+        }
+      }
+    } else {
+      // 通知を無効化: FCMトークンをSupabaseから削除
+      await NotificationService.instance.clearFcmToken();
+    }
+  }
+
+  Future<void> _loadVersionInfo() async {
+    final packageInfo = await PackageInfo.fromPlatform();
+    if (!mounted) return;
+    setState(() {
+      _currentVersion = packageInfo.version;
+      _currentBuildNumber = packageInfo.buildNumber;
+    });
+    // GitHub Releases から最新バージョンを取得
+    final updateInfo = await AppUpdateService.instance.checkForUpdate();
+    if (!mounted) return;
+    setState(() {
+      _latestUpdateInfo = updateInfo;
+    });
   }
 
   Future<void> _loadUserData({bool isRefresh = false}) async {
@@ -157,6 +228,81 @@ class _MyPageScreenState extends State<MyPageScreen> {
     }
   }
 
+  void _showVersionDialog() {
+    final hasUpdate = _latestUpdateInfo != null;
+    showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: Row(
+          children: [
+            Image.asset('icon.png', height: 36),
+            const SizedBox(width: 10),
+            const Text('SabaTube'),
+          ],
+        ),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            _versionRow('現在のバージョン', 'v$_currentVersion+$_currentBuildNumber'),
+            const SizedBox(height: 6),
+            _versionRow(
+              'GitHub 最新リリース',
+              hasUpdate ? 'v${_latestUpdateInfo!.versionName}' : 'v$_currentVersion（最新）',
+              valueColor: hasUpdate ? Colors.orange : Colors.green,
+            ),
+            if (hasUpdate && _latestUpdateInfo!.releaseNotes.isNotEmpty) ...[
+              const SizedBox(height: 12),
+              const Text('変更内容', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13)),
+              const SizedBox(height: 4),
+              Text(_latestUpdateInfo!.releaseNotes, style: const TextStyle(fontSize: 13)),
+            ],
+            const SizedBox(height: 16),
+            const Text('仲間内でYouTube動画を共有するアプリ', style: TextStyle(fontSize: 12, color: Colors.grey)),
+            const SizedBox(height: 4),
+            const Text('© 2026 サバの仲間たち', style: TextStyle(fontSize: 12, color: Colors.grey)),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(ctx).pop(),
+            child: const Text('閉じる'),
+          ),
+          if (hasUpdate)
+            ElevatedButton.icon(
+              onPressed: () {
+                Navigator.of(ctx).pop();
+                UpdateDialog.show(context, _latestUpdateInfo!);
+              },
+              icon: const Icon(Icons.system_update, size: 18),
+              label: const Text('アップデート'),
+              style: ElevatedButton.styleFrom(
+                backgroundColor: Colors.orange,
+                foregroundColor: Colors.white,
+              ),
+            ),
+        ],
+      ),
+    );
+  }
+
+  Widget _versionRow(String label, String value, {Color? valueColor}) {
+    return Row(
+      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+      children: [
+        Text(label, style: const TextStyle(fontSize: 13, color: Colors.grey)),
+        Text(
+          value,
+          style: TextStyle(
+            fontSize: 13,
+            fontWeight: FontWeight.bold,
+            color: valueColor,
+          ),
+        ),
+      ],
+    );
+  }
+
   String _getInitials(String? email) {
     // プロフィールがあればそれを使用
     if (_userProfile != null) {
@@ -182,7 +328,7 @@ class _MyPageScreenState extends State<MyPageScreen> {
     return Container(
       padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
-        color: Colors.white,
+        color: Theme.of(context).colorScheme.surface,
         borderRadius: BorderRadius.circular(12),
         boxShadow: [
           BoxShadow(
@@ -209,7 +355,7 @@ class _MyPageScreenState extends State<MyPageScreen> {
             label,
             style: TextStyle(
               fontSize: 12,
-              color: Colors.grey[600],
+              color: Theme.of(context).colorScheme.onSurfaceVariant,
             ),
           ),
         ],
@@ -276,11 +422,8 @@ class _MyPageScreenState extends State<MyPageScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: Colors.grey[100],
       appBar: AppBar(
         title: const Text('マイページ'),
-        elevation: 0,
-        backgroundColor: Colors.white,
         automaticallyImplyLeading: false, // 戻るボタンを非表示
       ),
       body: _isLoading
@@ -294,9 +437,7 @@ class _MyPageScreenState extends State<MyPageScreen> {
                   Container(
                     width: double.infinity,
                     padding: const EdgeInsets.all(24),
-                    decoration: const BoxDecoration(
-                      color: Colors.white,
-                    ),
+                    color: Theme.of(context).colorScheme.surface,
                     child: Column(
                       children: [
                         // アバター
@@ -334,7 +475,7 @@ class _MyPageScreenState extends State<MyPageScreen> {
                           _userEmail ?? '',
                           style: TextStyle(
                             fontSize: 14,
-                            color: Colors.grey[600],
+                            color: Theme.of(context).colorScheme.onSurfaceVariant,
                           ),
                         ),
                         const SizedBox(height: 4),
@@ -344,7 +485,7 @@ class _MyPageScreenState extends State<MyPageScreen> {
                           '登録日: ${_formatDate(_createdAt)}',
                           style: TextStyle(
                             fontSize: 14,
-                            color: Colors.grey[600],
+                            color: Theme.of(context).colorScheme.onSurfaceVariant,
                           ),
                         ),
                         const SizedBox(height: 16),
@@ -442,7 +583,7 @@ class _MyPageScreenState extends State<MyPageScreen> {
                   
                   // 設定セクション
                   Container(
-                    color: Colors.white,
+                    color: Theme.of(context).colorScheme.surface,
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
@@ -453,7 +594,7 @@ class _MyPageScreenState extends State<MyPageScreen> {
                             style: TextStyle(
                               fontSize: 18,
                               fontWeight: FontWeight.bold,
-                              color: Colors.grey[800],
+                              color: Theme.of(context).colorScheme.onSurface,
                             ),
                           ),
                         ),
@@ -461,29 +602,23 @@ class _MyPageScreenState extends State<MyPageScreen> {
                           icon: Icons.notifications,
                           title: '通知を受け取る',
                           value: _notificationsEnabled,
-                          onChanged: (value) {
-                            setState(() {
-                              _notificationsEnabled = value;
-                            });
-                          },
+                          onChanged: _toggleNotification,
                           iconColor: Colors.orange,
                         ),
                         const Divider(height: 1),
-                        _buildSwitchTile(
-                          icon: Icons.dark_mode,
-                          title: 'ダークモード',
-                          value: _darkModeEnabled,
-                          onChanged: (value) {
-                            setState(() {
-                              _darkModeEnabled = value;
-                            });
-                            ScaffoldMessenger.of(context).showSnackBar(
-                              const SnackBar(
-                                content: Text('ダークモード機能は準備中です'),
-                              ),
-                            );
-                          },
-                          iconColor: Colors.purple,
+                        ValueListenableBuilder<ThemeMode>(
+                          valueListenable: ThemeService.instance.themeMode,
+                          builder: (_, mode, __) => _buildSwitchTile(
+                            icon: mode == ThemeMode.dark ? Icons.dark_mode : Icons.light_mode,
+                            title: mode == ThemeMode.dark ? 'ダークモード' : 'ライトモード',
+                            value: mode == ThemeMode.dark,
+                            onChanged: (value) {
+                              ThemeService.instance.setThemeMode(
+                                value ? ThemeMode.dark : ThemeMode.light,
+                              );
+                            },
+                            iconColor: Colors.purple,
+                          ),
                         ),
                       ],
                     ),
@@ -493,7 +628,7 @@ class _MyPageScreenState extends State<MyPageScreen> {
                   
                   // その他のメニュー
                   Container(
-                    color: Colors.white,
+                    color: Theme.of(context).colorScheme.surface,
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
@@ -504,7 +639,7 @@ class _MyPageScreenState extends State<MyPageScreen> {
                             style: TextStyle(
                               fontSize: 18,
                               fontWeight: FontWeight.bold,
-                              color: Colors.grey[800],
+                              color: Theme.of(context).colorScheme.onSurface,
                             ),
                           ),
                         ),
@@ -557,7 +692,7 @@ class _MyPageScreenState extends State<MyPageScreen> {
                   
                   // サポート・情報
                   Container(
-                    color: Colors.white,
+                    color: Theme.of(context).colorScheme.surface,
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
@@ -568,7 +703,7 @@ class _MyPageScreenState extends State<MyPageScreen> {
                             style: TextStyle(
                               fontSize: 18,
                               fontWeight: FontWeight.bold,
-                              color: Colors.grey[800],
+                              color: Theme.of(context).colorScheme.onSurface,
                             ),
                           ),
                         ),
@@ -623,24 +758,17 @@ class _MyPageScreenState extends State<MyPageScreen> {
                         _buildMenuTile(
                           icon: Icons.info_outline,
                           title: 'アプリについて',
-                          subtitle: 'バージョン 1.8.0',
-                          onTap: () {
-                            showAboutDialog(
-                              context: context,
-                              applicationName: 'サバの動画',
-                              applicationVersion: '1.8.0',
-                              applicationIcon: const Icon(
-                                Icons.video_library,
-                                size: 48,
-                                color: Colors.blue,
-                              ),
-                              children: const [
-                                Text('仲間内でYouTube動画を共有するアプリ'),
-                                SizedBox(height: 8),
-                                Text('© 2026 サバの仲間たち'),
-                              ],
-                            );
+                          subtitle: _currentVersion.isEmpty
+                              ? '読み込み中...'
+                              : _latestUpdateInfo != null
+                                  ? 'v$_currentVersion  ／  最新: v${_latestUpdateInfo!.versionName} ↑'
+                                  : 'v$_currentVersion（最新）',
+                          onTap: _currentVersion.isEmpty ? null : () {
+                            _showVersionDialog();
                           },
+                          trailing: _latestUpdateInfo != null
+                              ? const Icon(Icons.system_update, color: Colors.orange)
+                              : const Icon(Icons.chevron_right),
                           iconColor: Colors.blue,
                         ),
                         const Divider(height: 1),

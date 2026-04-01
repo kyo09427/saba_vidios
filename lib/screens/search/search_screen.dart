@@ -17,11 +17,11 @@ class _SearchScreenState extends State<SearchScreen> {
   bool _isLoading = true;
   bool _hasText = false;
 
-  // テーマカラー（ホーム画面と統一）
-  final Color _ytBackground = const Color(0xFF0F0F0F);
-  final Color _ytSurface = const Color(0xFF272727);
-  final Color _textWhite = Colors.white;
-  final Color _textGray = const Color(0xFFAAAAAA);
+  // デザイン用カラー（テーマ対応ゲッター）
+  Color get _ytBackground => Theme.of(context).scaffoldBackgroundColor;
+  Color get _ytSurface => Theme.of(context).colorScheme.surface;
+  Color get _textWhite => Theme.of(context).colorScheme.onSurface;
+  Color get _textGray => Theme.of(context).colorScheme.onSurfaceVariant;
 
   @override
   void initState() {
@@ -77,12 +77,11 @@ class _SearchScreenState extends State<SearchScreen> {
 
   @override
   Widget build(BuildContext context) {
-    // ダークモードかどうかを判定して色を調整
-    final isDark = MediaQuery.of(context).platformBrightness == Brightness.dark;
-    final bgColor = isDark ? _ytBackground : Colors.white;
-    final surfaceColor = isDark ? _ytSurface : Colors.grey.shade200;
-    final textColor = isDark ? _textWhite : Colors.black87;
-    final subtleIconColor = isDark ? _textWhite : Colors.black54;
+    // アプリのテーマに合わせて色を調整
+    final bgColor = _ytBackground;
+    final surfaceColor = _ytSurface;
+    final textColor = _textWhite;
+    final subtleIconColor = _textGray;
 
     return Scaffold(
       backgroundColor: bgColor,
@@ -105,11 +104,11 @@ class _SearchScreenState extends State<SearchScreen> {
             controller: _searchController,
             autofocus: true,
             style: TextStyle(color: textColor, fontSize: 16),
-            cursorColor: isDark ? _textWhite : Colors.black87,
+            cursorColor: textColor,
             textInputAction: TextInputAction.search,
             decoration: InputDecoration(
               hintText: 'タイトル・カテゴリ・タグを検索',
-              hintStyle: TextStyle(color: isDark ? _textGray : Colors.grey, fontSize: 15),
+              hintStyle: TextStyle(color: subtleIconColor, fontSize: 15),
               border: InputBorder.none,
               contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
               isDense: true,
@@ -177,10 +176,10 @@ class _SearchScreenState extends State<SearchScreen> {
                     showDialog(
                       context: context,
                       builder: (context) => AlertDialog(
-                        backgroundColor: isDark ? _ytSurface : Colors.white,
+                        backgroundColor: _ytSurface,
                         title: Text('履歴から削除しますか？', style: TextStyle(color: textColor)),
                         content: Text('「$query」を検索履歴から削除します。',
-                            style: TextStyle(color: isDark ? _textGray : Colors.black87)),
+                            style: TextStyle(color: _textGray)),
                         actions: [
                           TextButton(
                             onPressed: () => Navigator.of(context).pop(),

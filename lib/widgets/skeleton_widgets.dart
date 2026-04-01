@@ -3,9 +3,8 @@ import 'package:flutter/material.dart';
 // ─────────────────────────────────────────────────────────────
 // デザイントークン（各スクリーンと統一）
 // ─────────────────────────────────────────────────────────────
-const Color _kBackground = Color(0xFF0F0F0F);
-const Color _kSurface = Color(0xFF272727);
-const Color _kSurfaceLight = Color(0xFF3A3A3A);
+// デザイントークンはテーマから動的取得するため定数削除
+// SkeletonBox内でTheme.of(context)を使って色を決定する
 
 // ─────────────────────────────────────────────────────────────
 // 共有シマーアニメーション（InheritedWidget）
@@ -85,6 +84,9 @@ class SkeletonBox extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    final kSurface = isDark ? const Color(0xFF272727) : Colors.grey.shade300;
+    final kSurfaceLight = isDark ? const Color(0xFF3A3A3A) : Colors.grey.shade200;
     final animation = _ShimmerScope.of(context);
     if (animation == null) {
       return Container(
@@ -92,7 +94,7 @@ class SkeletonBox extends StatelessWidget {
         height: height,
         decoration: BoxDecoration(
           borderRadius: BorderRadius.circular(borderRadius),
-          color: _kSurface,
+          color: kSurface,
         ),
       );
     }
@@ -106,7 +108,7 @@ class SkeletonBox extends StatelessWidget {
           gradient: LinearGradient(
             begin: Alignment(animation.value - 1, 0),
             end: Alignment(animation.value + 1, 0),
-            colors: const [_kSurface, _kSurfaceLight, _kSurface],
+            colors: [kSurface, kSurfaceLight, kSurface],
           ),
         ),
       ),
@@ -289,9 +291,10 @@ class SkeletonListView extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final bgColor = backgroundColor ?? Theme.of(context).scaffoldBackgroundColor;
     return _ShimmerProvider(
       child: Container(
-        color: backgroundColor ?? _kBackground,
+        color: bgColor,
         child: Column(
           children: List.generate(itemCount, (_) => itemBuilder()),
         ),

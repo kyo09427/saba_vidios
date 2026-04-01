@@ -43,12 +43,12 @@ class _HomeScreenState extends State<HomeScreen> {
     'その他',
   ];
 
-  // デザイン用カラー定義
-  final Color _ytBackground = const Color(0xFF0F0F0F);
-  final Color _ytSurface = const Color(0xFF272727);
-  final Color _ytRed = const Color(0xFFF20D0D);
-  final Color _textWhite = Colors.white;
-  final Color _textGray = const Color(0xFFAAAAAA);
+  // デザイン用カラー（テーマ対応ゲッター）
+  static const Color _ytRed = Color(0xFFF20D0D);
+  Color get _ytBackground => Theme.of(context).scaffoldBackgroundColor;
+  Color get _ytSurface => Theme.of(context).colorScheme.surface;
+  Color get _textWhite => Theme.of(context).colorScheme.onSurface;
+  Color get _textGray => Theme.of(context).colorScheme.onSurfaceVariant;
 
   // 検索関連
   bool _isSearchActive = false;
@@ -335,7 +335,8 @@ class _HomeScreenState extends State<HomeScreen> {
             
             final category = _filterCategories[index - 1];
             final isSelected = _selectedFilter == category;
-            
+            final isDark = Theme.of(context).brightness == Brightness.dark;
+
             return GestureDetector(
               onTap: () {
                 setState(() {
@@ -346,14 +347,18 @@ class _HomeScreenState extends State<HomeScreen> {
               child: Container(
                 padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
                 decoration: BoxDecoration(
-                  color: isSelected ? _textWhite : _ytSurface,
+                  color: isSelected
+                      ? (isDark ? Colors.white : Colors.black87)
+                      : (isDark ? const Color(0xFF272727) : Colors.grey.shade200),
                   borderRadius: BorderRadius.circular(8),
                 ),
                 child: Center(
                   child: Text(
                     category,
                     style: TextStyle(
-                      color: isSelected ? Colors.black : _textWhite,
+                      color: isSelected
+                          ? (isDark ? Colors.black : Colors.white)
+                          : (isDark ? Colors.white : Colors.black87),
                       fontWeight: FontWeight.w500,
                       fontSize: 14,
                     ),
@@ -582,10 +587,10 @@ class _HomeScreenState extends State<HomeScreen> {
                     child: Icon(Icons.play_circle_filled, color: _ytRed, size: 30),
                   ),
                   const SizedBox(width: 4),
-                  const Text(
+                  Text(
                     'SabaTube',
                     style: TextStyle(
-                      color: Colors.white,
+                      color: _textWhite,
                       fontWeight: FontWeight.bold,
                       fontSize: 20,
                       letterSpacing: -1,
@@ -791,7 +796,7 @@ class _HomeScreenState extends State<HomeScreen> {
   // --- [AppBar Helper Methods] ---
 
   Widget _buildPCAppBarTitle(BuildContext context) {
-    final isDark = MediaQuery.of(context).platformBrightness == Brightness.dark;
+    final isDark = Theme.of(context).brightness == Brightness.dark;
     final hintColor = isDark ? const Color(0xFFAAAAAA) : Colors.black45;
     final textColor = isDark ? Colors.white : Colors.black87;
     final bgColor = isDark ? const Color(0xFF121212) : Colors.white;
@@ -806,10 +811,10 @@ class _HomeScreenState extends State<HomeScreen> {
             children: [
               Image.asset('icon.png', height: 30),
               const SizedBox(width: 4),
-              const Text(
+              Text(
                 'SabaTube',
                 style: TextStyle(
-                  color: Colors.white,
+                  color: textColor,
                   fontWeight: FontWeight.bold,
                   fontSize: 20,
                   letterSpacing: -1,
@@ -954,10 +959,10 @@ class _HomeScreenState extends State<HomeScreen> {
               child: Icon(Icons.play_circle_filled, color: _ytRed, size: 30),
             ),
             const SizedBox(width: 4),
-            const Text(
+            Text(
               'SabaTube',
               style: TextStyle(
-                color: Colors.white,
+                color: _textWhite,
                 fontWeight: FontWeight.bold,
                 fontSize: 20,
                 letterSpacing: -1,

@@ -40,12 +40,12 @@ class _SubscriptionsScreenState extends State<SubscriptionsScreen> {
     'その他',
   ];
 
-  // デザイン用カラー定義
-  final Color _ytBackground = const Color(0xFF0F0F0F);
-  final Color _ytSurface = const Color(0xFF272727);
-  final Color _ytRed = const Color(0xFFF20D0D);
-  final Color _textWhite = Colors.white;
-  final Color _textGray = const Color(0xFFAAAAAA);
+  // デザイン用カラー（テーマ対応ゲッター）
+  static const Color _ytRed = Color(0xFFF20D0D);
+  Color get _ytBackground => Theme.of(context).scaffoldBackgroundColor;
+  Color get _ytSurface => Theme.of(context).colorScheme.surface;
+  Color get _textWhite => Theme.of(context).colorScheme.onSurface;
+  Color get _textGray => Theme.of(context).colorScheme.onSurfaceVariant;
 
   @override
   void initState() {
@@ -293,6 +293,7 @@ class _SubscriptionsScreenState extends State<SubscriptionsScreen> {
           itemBuilder: (context, index) {
             final category = _filterCategories[index];
             final isSelected = _selectedCategoryFilter == category;
+            final isDark = Theme.of(context).brightness == Brightness.dark;
             
             return GestureDetector(
               onTap: () {
@@ -304,14 +305,18 @@ class _SubscriptionsScreenState extends State<SubscriptionsScreen> {
               child: Container(
                 padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
                 decoration: BoxDecoration(
-                  color: isSelected ? _textWhite : _ytSurface,
+                  color: isSelected
+                      ? (isDark ? Colors.white : Colors.black87)
+                      : (isDark ? const Color(0xFF272727) : Colors.grey.shade200),
                   borderRadius: BorderRadius.circular(8),
                 ),
                 child: Center(
                   child: Text(
                     category,
                     style: TextStyle(
-                      color: isSelected ? Colors.black : _textWhite,
+                      color: isSelected
+                          ? (isDark ? Colors.black : Colors.white)
+                          : (isDark ? Colors.white : Colors.black87),
                       fontWeight: FontWeight.w500,
                       fontSize: 14,
                     ),
@@ -497,10 +502,10 @@ class _SubscriptionsScreenState extends State<SubscriptionsScreen> {
               children: [
                 Icon(Icons.subscriptions, color: _ytRed, size: 24),
                 const SizedBox(width: 8),
-                const Text(
+                Text(
                   '登録チャンネル',
                   style: TextStyle(
-                    color: Colors.white,
+                    color: _textWhite,
                     fontWeight: FontWeight.bold,
                     fontSize: 16,
                   ),
@@ -508,7 +513,7 @@ class _SubscriptionsScreenState extends State<SubscriptionsScreen> {
               ],
             ),
           ),
-          const Divider(color: Color(0xFF272727), height: 1),
+          const Divider(height: 1),
           
           // 「すべて」のチャンネル
           _buildChannelItem(
@@ -517,7 +522,7 @@ class _SubscriptionsScreenState extends State<SubscriptionsScreen> {
             label: 'すべて',
           ),
           
-          const Divider(color: Color(0xFF272727), height: 1),
+          const Divider(height: 1),
           
           // 登録チャンネル一覧
           Expanded(
@@ -763,13 +768,13 @@ class _SubscriptionsScreenState extends State<SubscriptionsScreen> {
   /// スケルトンビュー（初回ロード中に表示）
   Widget _buildSkeletonView() {
     return Container(
-      color: const Color(0xFF0F0F0F),
+      color: _ytBackground,
       child: CustomScrollView(
         physics: const NeverScrollableScrollPhysics(),
         slivers: [
           SliverAppBar(
             floating: true,
-            backgroundColor: const Color(0xFF0F0F0F).withValues(alpha: 0.95),
+            backgroundColor: _ytBackground.withValues(alpha: 0.95),
             elevation: 0,
             titleSpacing: 0,
             leadingWidth: 0,
@@ -781,10 +786,10 @@ class _SubscriptionsScreenState extends State<SubscriptionsScreen> {
                 children: [
                   Icon(Icons.subscriptions, color: _ytRed, size: 28),
                   const SizedBox(width: 8),
-                  const Text(
+                  Text(
                     '登録チャンネル',
                     style: TextStyle(
-                      color: Colors.white,
+                      color: _textWhite,
                       fontWeight: FontWeight.bold,
                       fontSize: 20,
                     ),
