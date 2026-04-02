@@ -1,8 +1,13 @@
 import 'package:firebase_messaging/firebase_messaging.dart';
 import 'package:flutter/foundation.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import '../models/notification_model.dart';
 import 'supabase_service.dart';
+
+/// SharedPreferences キー: 自プラットフォームのFCMトークン登録済みフラグ。
+/// タスクキル後に「以前トークンを持っていたか」を判定するために永続化する。
+const _kHadTokenKey = 'had_fcm_token';
 
 /// Web FCM 用の VAPID 公開鍵。
 /// Firebase Console > Project Settings > Cloud Messaging > Web configuration > 鍵ペア
@@ -37,13 +42,24 @@ class NotificationService {
   /// 未読通知数。UI側は ValueListenableBuilder でリッスンする。
   final ValueNotifier<int> unreadCount = ValueNotifier(0);
 
+  /// 他プラットフォームからのログインを検知したとき true になる。
+  /// main.dart でリッスンして強制ログアウト処理を行う。
+  final ValueNotifier<bool> forcedLogout = ValueNotifier(false);
+
   RealtimeChannel? _realtimeChannel;
+  RealtimeChannel? _profilesChannel;
 
   /// initialize() の多重呼び出しを防ぐフラグ
   bool _isInitialized = false;
 
   /// FCMリスナーの多重登録を防ぐフラグ
   bool _isFcmInitialized = false;
+
+  /// FCMトークンを登録済みかどうか（強制ログアウト検知に使用）
+  bool _hadToken = false;
+
+  /// ログアウト処理中フラグ（自分のログアウトによる誤検知を防ぐ）
+  bool _isDisposing = false;
 
   // ------------------------------------------------------------------
   // 初期化 / 破棄
@@ -55,18 +71,68 @@ class NotificationService {
   Future<void> initialize() async {
     if (_isInitialized) return;
     _isInitialized = true;
+
+    // タスクキル中に他プラットフォームでログインされていた場合は強制ログアウト
+    if (await _isDisplacedByAnotherPlatform()) {
+      forcedLogout.value = true;
+      _isInitialized = false;
+      return;
+    }
+
     await refreshUnreadCount();
     await _subscribeRealtime();
+    await _subscribeProfileChanges();
     await _initFcm();
   }
 
+  /// 自プラットフォームがタスクキル中に他プラットフォームにセッションを奪われたか確認する。
+  ///
+  /// 判定ロジック:
+  ///   1. SharedPreferences に「以前トークンを登録した」フラグがある
+  ///   2. かつ DB 上で自分のトークンが null になっている（他プラットフォームに消された）
+  ///
+  /// フラグがない場合（新規ログイン・明示的ログアウト後）は誤検知を防ぐため false を返す。
+  Future<bool> _isDisplacedByAnotherPlatform() async {
+    try {
+      // 以前トークンを登録していなければ追い出しは起きていない
+      final prefs = await SharedPreferences.getInstance();
+      final hadToken = prefs.getBool(_kHadTokenKey) ?? false;
+      if (!hadToken) return false;
+
+      final userId = _client.auth.currentUser?.id;
+      if (userId == null) return false;
+
+      final profile = await _client
+          .from('profiles')
+          .select('fcm_token, web_fcm_token')
+          .eq('id', userId)
+          .maybeSingle();
+
+      if (profile == null) return false;
+
+      // 自分のトークンが null になっている = 他プラットフォームのログインに消された
+      final myColumn = kIsWeb ? 'web_fcm_token' : 'fcm_token';
+      return profile[myColumn] == null;
+    } catch (e) {
+      debugPrint('❌ NotificationService._isDisplacedByAnotherPlatform: $e');
+      return false;
+    }
+  }
+
   /// ログアウト時に呼び出す。購読を解除し未読数をリセットする。
+  /// clearFcmToken() より先に呼ぶこと（誤検知防止のため）。
   Future<void> dispose() async {
+    _isDisposing = true;
     await _realtimeChannel?.unsubscribe();
     _realtimeChannel = null;
+    await _profilesChannel?.unsubscribe();
+    _profilesChannel = null;
     unreadCount.value = 0;
+    forcedLogout.value = false;
     _isInitialized = false;
     _isFcmInitialized = false;
+    _hadToken = false;
+    _isDisposing = false;
   }
 
   // ------------------------------------------------------------------
@@ -164,6 +230,50 @@ class NotificationService {
           callback: (_) {
             // 新着通知が届いたら未読数をインクリメント
             unreadCount.value += 1;
+          },
+        )
+        .subscribe();
+  }
+
+  // ------------------------------------------------------------------
+  // プロフィール変更の購読（他プラットフォームからのログイン検知）
+  // ------------------------------------------------------------------
+
+  /// 自分の profiles 行を Realtime で監視し、
+  /// 他プラットフォームのログインによって自分のトークンが消された場合に
+  /// [forcedLogout] を true にする。
+  Future<void> _subscribeProfileChanges() async {
+    final userId = _client.auth.currentUser?.id;
+    if (userId == null) return;
+
+    // 自プラットフォームのトークンカラム名
+    final myColumn = kIsWeb ? 'web_fcm_token' : 'fcm_token';
+
+    await _profilesChannel?.unsubscribe();
+
+    _profilesChannel = _client
+        .channel('profile_session:$userId')
+        .onPostgresChanges(
+          event: PostgresChangeEvent.update,
+          schema: 'public',
+          table: 'profiles',
+          filter: PostgresChangeFilter(
+            type: PostgresChangeFilterType.eq,
+            column: 'id',
+            value: userId,
+          ),
+          callback: (payload) {
+            if (_isDisposing) return;
+            // トークンを一度も登録していない場合は無視
+            if (!_hadToken) return;
+
+            final newRecord = payload.newRecord;
+            // ペイロードにカラムが含まれない場合は判定をスキップ（誤検知防止）
+            if (!newRecord.containsKey(myColumn)) return;
+            if (newRecord[myColumn] == null) {
+              debugPrint('⚠️ 他のデバイスからのログインを検知。強制ログアウトします。');
+              forcedLogout.value = true;
+            }
           },
         )
         .subscribe();
@@ -292,6 +402,9 @@ class NotificationService {
               : {'fcm_token': token, 'web_fcm_token': null})
           .eq('id', userId);
 
+      _hadToken = true;
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setBool(_kHadTokenKey, true);
       debugPrint('✅ FCMトークンを登録しました (${kIsWeb ? "Web" : "Android"})');
     } catch (e) {
       debugPrint('❌ NotificationService.registerFcmToken: $e');
@@ -310,6 +423,10 @@ class NotificationService {
           .from('profiles')
           .update({column: null})
           .eq('id', userId);
+
+      // タスクキル後の誤検知防止のためフラグをリセット
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setBool(_kHadTokenKey, false);
     } catch (e) {
       debugPrint('❌ NotificationService.clearFcmToken: $e');
     }

@@ -1,4 +1,5 @@
 import 'package:firebase_core/firebase_core.dart';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:intl/date_symbol_data_local.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
@@ -145,6 +146,40 @@ class _AuthWrapperState extends State<AuthWrapper> {
   bool _isInitialized = false;
   String? _errorMessage;
 
+  @override
+  void dispose() {
+    NotificationService.instance.forcedLogout.removeListener(_onForcedLogout);
+    super.dispose();
+  }
+
+  /// 他プラットフォームからのログインを検知した際に強制ログアウトする。
+  Future<void> _onForcedLogout() async {
+    if (!NotificationService.instance.forcedLogout.value) return;
+    if (!mounted) return;
+
+    final platform = kIsWeb ? 'Android アプリ' : 'ブラウザ';
+
+    await showDialog<void>(
+      context: context,
+      barrierDismissible: false,
+      builder: (ctx) => AlertDialog(
+        title: const Text('別のデバイスでログイン'),
+        content: Text('$platform から同じアカウントでログインされました。このセッションを終了します。'),
+        actions: [
+          FilledButton(
+            onPressed: () async {
+              Navigator.pop(ctx);
+              await NotificationService.instance.dispose();
+              await NotificationService.instance.clearFcmToken();
+              await SupabaseService.instance.signOut();
+            },
+            child: const Text('OK'),
+          ),
+        ],
+      ),
+    );
+  }
+
   /// Discordギルド検証の状態管理
   /// null: 検証不要 or 未開始, true: 検証中, false: 検証完了
   bool? _isVerifyingGuild;
@@ -155,6 +190,7 @@ class _AuthWrapperState extends State<AuthWrapper> {
   void initState() {
     super.initState();
     _checkInitialization();
+    NotificationService.instance.forcedLogout.addListener(_onForcedLogout);
   }
 
   Future<void> _checkInitialization() async {
@@ -452,8 +488,8 @@ class _AuthWrapperState extends State<AuthWrapper> {
           if (_guildVerified || _isVerifyingGuild != null) {
             WidgetsBinding.instance.addPostFrameCallback((_) {
               if (mounted) {
-                NotificationService.instance.clearFcmToken();
                 NotificationService.instance.dispose();
+                NotificationService.instance.clearFcmToken();
                 setState(() {
                   _guildVerified = false;
                   _isVerifyingGuild = null;
