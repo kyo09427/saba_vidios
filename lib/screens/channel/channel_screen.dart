@@ -8,6 +8,7 @@ import '../../services/cache_service.dart';
 import '../../services/playlist_service.dart';
 import '../../services/supabase_service.dart';
 import '../../services/youtube_service.dart';
+import '../../widgets/app_navigation_scaffold.dart';
 import '../../widgets/skeleton_widgets.dart';
 
 /// チャンネル画面
@@ -460,7 +461,9 @@ class _ChannelScreenState extends State<ChannelScreen>
     final currentUserId = SupabaseService.instance.currentUser?.id;
     final isOwnChannel = currentUserId == widget.channelId;
 
-    return Scaffold(
+    return AppNavigationScaffold(
+      currentIndex: -1,
+      currentChannelId: widget.channelId,
       backgroundColor: _ytBackground,
       body: SafeArea(
         child: _isLoading

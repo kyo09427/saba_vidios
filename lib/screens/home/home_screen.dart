@@ -11,7 +11,7 @@ import '../../services/youtube_service.dart';
 import '../../widgets/update_dialog.dart';
 import '../notifications/notifications_screen.dart';
 import '../../utils/japanese_text_utils.dart';
-import '../../widgets/app_bottom_navigation_bar.dart';
+import '../../widgets/app_navigation_scaffold.dart';
 import '../../widgets/skeleton_widgets.dart';
 import '../auth/login_screen.dart';
 import '../channel/channel_screen.dart';
@@ -669,29 +669,32 @@ class _HomeScreenState extends State<HomeScreen> {
 
   @override
   Widget build(BuildContext context) {
-    // 画面幅に応じた列数を計算
-    final screenWidth = MediaQuery.of(context).size.width;
-    int crossAxisCount;
-    double childAspectRatio;
-
-    if (screenWidth < 600) {
-      crossAxisCount = 1;
-      childAspectRatio = 1.0; // 1列はSliverListを使うので参照されない
-    } else if (screenWidth < 900) {
-      crossAxisCount = 2;
-      childAspectRatio = _calcAspectRatio(screenWidth, 2);
-    } else if (screenWidth < 1200) {
-      crossAxisCount = 3;
-      childAspectRatio = _calcAspectRatio(screenWidth, 3);
-    } else {
-      crossAxisCount = 4;
-      childAspectRatio = _calcAspectRatio(screenWidth, 4);
-    }
-
-    return Scaffold(
+    return AppNavigationScaffold(
+      currentIndex: 0,
       backgroundColor: _ytBackground,
-      body: SafeArea(
-        bottom: false,
+      body: LayoutBuilder(
+        builder: (context, constraints) {
+          // サイドバー分を除いた実際の利用可能幅で列数・比率を計算
+          final screenWidth = constraints.maxWidth;
+          int crossAxisCount;
+          double childAspectRatio;
+
+          if (screenWidth < 600) {
+            crossAxisCount = 1;
+            childAspectRatio = 1.0; // 1列はSliverListを使うので参照されない
+          } else if (screenWidth < 900) {
+            crossAxisCount = 2;
+            childAspectRatio = _calcAspectRatio(screenWidth, 2);
+          } else if (screenWidth < 1200) {
+            crossAxisCount = 3;
+            childAspectRatio = _calcAspectRatio(screenWidth, 3);
+          } else {
+            crossAxisCount = 4;
+            childAspectRatio = _calcAspectRatio(screenWidth, 4);
+          }
+
+          return SafeArea(
+            bottom: false,
         child: _isLoading
             ? _buildSkeletonView()
             : _errorMessage != null
@@ -787,9 +790,9 @@ class _HomeScreenState extends State<HomeScreen> {
                       ],
                     ),
                   ),
+          );
+        },
       ),
-      // ボトムナビゲーション
-      bottomNavigationBar: const AppBottomNavigationBar(currentIndex: 0),
     );
   }
 
@@ -802,27 +805,30 @@ class _HomeScreenState extends State<HomeScreen> {
     final bgColor = isDark ? const Color(0xFF121212) : Colors.white;
     final borderColor = isDark ? const Color(0xFF333333) : Colors.grey.shade300;
 
+    final hasSidebar = MediaQuery.of(context).size.width >= 1100;
+
     return Row(
       children: [
-        // ロゴ
-        Padding(
-          padding: const EdgeInsets.only(left: 12),
-          child: Row(
-            children: [
-              Image.asset('icon.png', height: 30),
-              const SizedBox(width: 4),
-              Text(
-                'SabaTube',
-                style: TextStyle(
-                  color: textColor,
-                  fontWeight: FontWeight.bold,
-                  fontSize: 20,
-                  letterSpacing: -1,
+        // ロゴ（サイドバーがない場合のみ表示）
+        if (!hasSidebar)
+          Padding(
+            padding: const EdgeInsets.only(left: 12),
+            child: Row(
+              children: [
+                Image.asset('icon.png', height: 30),
+                const SizedBox(width: 4),
+                Text(
+                  'SabaTube',
+                  style: TextStyle(
+                    color: textColor,
+                    fontWeight: FontWeight.bold,
+                    fontSize: 20,
+                    letterSpacing: -1,
+                  ),
                 ),
-              ),
-            ],
+              ],
+            ),
           ),
-        ),
         // 検索バー (ドロップダウン)
         Expanded(
           child: Center(

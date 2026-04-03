@@ -566,6 +566,7 @@ class _EditVideoSheet extends StatefulWidget {
 class _EditVideoSheetState extends State<_EditVideoSheet> {
   final _formKey = GlobalKey<FormState>();
   late final TextEditingController _titleController;
+  late final TextEditingController _durationController;
   late final TextEditingController _tagInputController;
   final _supabase = SupabaseService.instance.client;
 
@@ -584,6 +585,7 @@ class _EditVideoSheetState extends State<_EditVideoSheet> {
   void initState() {
     super.initState();
     _titleController = TextEditingController(text: widget.video.title);
+    _durationController = TextEditingController(text: widget.video.duration ?? '');
     _tagInputController = TextEditingController();
     _selectedCategory = widget.video.mainCategory;
     _tags = List.from(widget.video.tags);
@@ -673,6 +675,7 @@ class _EditVideoSheetState extends State<_EditVideoSheet> {
   @override
   void dispose() {
     _titleController.dispose();
+    _durationController.dispose();
     _tagInputController.dispose();
     super.dispose();
   }
@@ -700,11 +703,13 @@ class _EditVideoSheetState extends State<_EditVideoSheet> {
 
     try {
       // videosテーブルを更新
+      final durationText = _durationController.text.trim();
       await _supabase
           .from('videos')
           .update({
             'title': _titleController.text.trim(),
             'main_category': _selectedCategory,
+            'duration': durationText.isEmpty ? null : durationText,
           })
           .eq('id', widget.video.id);
 
@@ -1078,6 +1083,23 @@ class _EditVideoSheetState extends State<_EditVideoSheet> {
                             setState(() => _selectedCategory = value);
                           }
                         },
+                      ),
+                      const SizedBox(height: 14),
+
+                      // 再生時間入力（任意）
+                      TextFormField(
+                        controller: _durationController,
+                        style: const TextStyle(
+                          color: Colors.white,
+                          fontSize: 14,
+                        ),
+                        decoration: fieldDeco(
+                          label: '再生時間（任意）',
+                          icon: Icons.timer_outlined,
+                          helper: '例: "12:45" または "1:23:45"',
+                        ),
+                        keyboardType: TextInputType.text,
+                        textInputAction: TextInputAction.next,
                       ),
                       const SizedBox(height: 14),
 

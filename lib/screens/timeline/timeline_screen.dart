@@ -4,7 +4,7 @@ import '../../models/video.dart';
 import '../../services/cache_service.dart';
 import '../../services/supabase_service.dart';
 import '../../services/youtube_service.dart';
-import '../../widgets/app_bottom_navigation_bar.dart';
+import '../../widgets/app_navigation_scaffold.dart';
 import '../../widgets/skeleton_widgets.dart';
 import '../channel/channel_screen.dart';
 
@@ -673,7 +673,8 @@ class _TimelineScreenState extends State<TimelineScreen> {
     final screenWidth = MediaQuery.of(context).size.width;
     final isWideScreen = screenWidth > 800;
 
-    return Scaffold(
+    return AppNavigationScaffold(
+      currentIndex: 1,
       backgroundColor: _ytBackground,
       body: SafeArea(
         bottom: false,
@@ -829,8 +830,6 @@ class _TimelineScreenState extends State<TimelineScreen> {
           ],
         ),
       ),
-      bottomNavigationBar:
-          const AppBottomNavigationBar(currentIndex: 1),
     );
   }
 }
