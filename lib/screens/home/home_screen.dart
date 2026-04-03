@@ -56,13 +56,28 @@ class _HomeScreenState extends State<HomeScreen> {
   final SearchController _pcSearchController = SearchController();
   String _searchQuery = '';
 
+  // ページネーション
+  int _offset = 0;
+  static const int _pageSize = 20;
+  bool _hasMore = true;
+  bool _isLoadingMore = false;
+  final ScrollController _scrollController = ScrollController();
+
   @override
   void initState() {
     super.initState();
     _loadVideos();
     _setupRealtimeSubscription();
+    _scrollController.addListener(_onScroll);
     // アップデート確認（フレーム描画後に実行）
     WidgetsBinding.instance.addPostFrameCallback((_) => _checkForUpdate());
+  }
+
+  void _onScroll() {
+    if (_scrollController.position.pixels >=
+        _scrollController.position.maxScrollExtent - 400) {
+      _loadMoreVideos();
+    }
   }
 
   Future<void> _checkForUpdate() async {
@@ -77,6 +92,7 @@ class _HomeScreenState extends State<HomeScreen> {
     _cleanupRealtimeSubscription();
     _searchController.dispose();
     _pcSearchController.dispose();
+    _scrollController.dispose();
     super.dispose();
   }
 
@@ -89,6 +105,13 @@ class _HomeScreenState extends State<HomeScreen> {
   Future<void> _loadVideos({bool isRefresh = false}) async {
     if (!mounted) return;
 
+    // リフレッシュ時はキャッシュとページネーション状態をリセット
+    if (isRefresh) {
+      CacheService.instance.invalidate(CacheKeys.homeVideos);
+      _offset = 0;
+      _hasMore = true;
+    }
+
     // ── キャッシュ読み込み（初回表示のみ、リフレッシュ時はスキップ）──
     if (!isRefresh) {
       final cached = CacheService.instance.get<List<Video>>(CacheKeys.homeVideos);
@@ -96,6 +119,7 @@ class _HomeScreenState extends State<HomeScreen> {
         if (mounted) {
           setState(() {
             _videos = cached;
+            _offset = cached.length;
             _applyFilter();
             _isLoading = false;
           });
@@ -110,11 +134,12 @@ class _HomeScreenState extends State<HomeScreen> {
     });
 
     try {
-      // 動画データを取得
+      // 動画データを取得（最初の _pageSize 件のみ）
       final response = await _supabase
           .from('videos')
           .select('*')
-          .order('created_at', ascending: false);
+          .order('created_at', ascending: false)
+          .range(0, _pageSize - 1);
 
       final videosData = response is List<dynamic> ? response : <dynamic>[];
 
@@ -190,6 +215,10 @@ class _HomeScreenState extends State<HomeScreen> {
           .where((video) => video.id.isNotEmpty)
           .toList();
 
+      // ページネーション状態を更新
+      _offset = videos.length;
+      _hasMore = videosData.length == _pageSize;
+
       // キャッシュに保存
       CacheService.instance.set<List<Video>>(CacheKeys.homeVideos, videos);
 
@@ -208,6 +237,103 @@ class _HomeScreenState extends State<HomeScreen> {
           _isLoading = false;
         });
       }
+    }
+  }
+
+  /// スクロール末端に達したら追加の動画を取得する
+  Future<void> _loadMoreVideos() async {
+    if (!mounted || _isLoadingMore || !_hasMore) return;
+    setState(() => _isLoadingMore = true);
+
+    try {
+      final response = await _supabase
+          .from('videos')
+          .select('*')
+          .order('created_at', ascending: false)
+          .range(_offset, _offset + _pageSize - 1);
+
+      final videosData = response is List<dynamic> ? response : <dynamic>[];
+      if (videosData.isEmpty) {
+        if (mounted) setState(() { _hasMore = false; _isLoadingMore = false; });
+        return;
+      }
+
+      // プロフィール情報を一括取得
+      final userIds = videosData
+          .whereType<Map<String, dynamic>>()
+          .map((v) => v['user_id'] as String?)
+          .where((id) => id != null && id.isNotEmpty)
+          .toSet()
+          .toList();
+
+      Map<String, dynamic> profilesMap = {};
+      if (userIds.isNotEmpty) {
+        final profilesResponse = await _supabase
+            .from('profiles')
+            .select('*')
+            .inFilter('id', userIds);
+        for (final profile in (profilesResponse is List ? profilesResponse : <dynamic>[])) {
+          if (profile is Map<String, dynamic>) {
+            final id = profile['id'] as String?;
+            if (id != null) profilesMap[id] = profile;
+          }
+        }
+      }
+
+      // タグ情報を一括取得
+      final videoIds = videosData
+          .whereType<Map<String, dynamic>>()
+          .map((v) => v['id'] as String? ?? '')
+          .where((id) => id.isNotEmpty)
+          .toList();
+
+      Map<String, List<String>> videoTagsMap = {};
+      if (videoIds.isNotEmpty) {
+        final tagsResponse = await _supabase
+            .from('video_tags')
+            .select('video_id, tags!inner(name)')
+            .inFilter('video_id', videoIds);
+        for (final item in (tagsResponse is List ? tagsResponse : <dynamic>[])) {
+          if (item is! Map<String, dynamic>) continue;
+          final videoId = item['video_id'] as String? ?? '';
+          final tagName = item['tags'] is Map
+              ? (item['tags'] as Map)['name'] as String? ?? ''
+              : '';
+          if (videoId.isEmpty || tagName.isEmpty) continue;
+          videoTagsMap.putIfAbsent(videoId, () => []).add(tagName);
+        }
+      }
+
+      final newVideos = videosData
+          .whereType<Map<String, dynamic>>()
+          .map((videoJson) {
+            final userId = videoJson['user_id'] as String?;
+            if (userId != null && profilesMap.containsKey(userId)) {
+              videoJson['profiles'] = profilesMap[userId];
+            }
+            final videoId = videoJson['id'] as String? ?? '';
+            videoJson['tags'] = videoTagsMap[videoId] ?? [];
+            return Video.fromJsonWithProfile(videoJson);
+          })
+          .where((video) => video.id.isNotEmpty)
+          .toList();
+
+      _offset += videosData.length;
+      _hasMore = videosData.length == _pageSize;
+
+      final allVideos = [..._videos, ...newVideos];
+      CacheService.instance.set<List<Video>>(CacheKeys.homeVideos, allVideos);
+
+      if (mounted) {
+        setState(() {
+          _videos = allVideos;
+          _applyFilter();
+          _isLoadingMore = false;
+        });
+      }
+    } catch (e) {
+      debugPrint('❌ Error loading more videos: $e');
+      if (mounted) setState(() => _isLoadingMore = false);
     }
   }
 
@@ -433,6 +559,7 @@ class _HomeScreenState extends State<HomeScreen> {
                 child: video.thumbnailUrl != null && video.thumbnailUrl!.isNotEmpty
                     ? CachedNetworkImage(
                         imageUrl: video.thumbnailUrl!,
+                        memCacheWidth: 640,
                         fit: BoxFit.cover,
                         placeholder: (context, url) => Container(
                           color: _ytSurface,
@@ -704,6 +831,7 @@ class _HomeScreenState extends State<HomeScreen> {
                     color: _ytRed,
                     backgroundColor: _ytSurface,
                     child: CustomScrollView(
+                      controller: _scrollController,
                       slivers: [
                         // ヘッダー
                         SliverAppBar(
@@ -785,6 +913,15 @@ class _HomeScreenState extends State<HomeScreen> {
                               ),
                             ),
 
+                          if (_isLoadingMore)
+                            SliverToBoxAdapter(
+                              child: Padding(
+                                padding: const EdgeInsets.all(16),
+                                child: Center(
+                                  child: CircularProgressIndicator(color: _ytRed),
+                                ),
+                              ),
+                            ),
                           const SliverToBoxAdapter(child: SizedBox(height: 80)),
                         ],
                       ],

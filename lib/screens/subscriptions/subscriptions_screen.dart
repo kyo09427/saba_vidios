@@ -47,15 +47,44 @@ class _SubscriptionsScreenState extends State<SubscriptionsScreen> {
   Color get _textWhite => Theme.of(context).colorScheme.onSurface;
   Color get _textGray => Theme.of(context).colorScheme.onSurfaceVariant;
 
+  // ページネーション
+  int _offset = 0;
+  static const int _pageSize = 20;
+  bool _hasMore = true;
+  bool _isLoadingMore = false;
+  final ScrollController _scrollController = ScrollController();
+
   @override
   void initState() {
     super.initState();
     _loadSubscribedChannels();
+    _scrollController.addListener(_onScroll);
+  }
+
+  void _onScroll() {
+    if (_scrollController.position.pixels >=
+        _scrollController.position.maxScrollExtent - 400) {
+      _loadMoreVideos();
+    }
+  }
+
+  @override
+  void dispose() {
+    _scrollController.dispose();
+    super.dispose();
   }
 
   /// 登録チャンネル一覧を読み込む
   Future<void> _loadSubscribedChannels({bool isRefresh = false}) async {
     if (!mounted) return;
+
+    // リフレッシュ時はキャッシュとページネーション状態をリセット
+    if (isRefresh) {
+      CacheService.instance.invalidate(CacheKeys.subscriptionVideos);
+      CacheService.instance.invalidate(CacheKeys.subscribedChannelIds);
+      _offset = 0;
+      _hasMore = true;
+    }
 
     // ── キャッシュ読み込み（初回表示のみ）──
     if (!isRefresh) {
@@ -68,6 +97,7 @@ class _SubscriptionsScreenState extends State<SubscriptionsScreen> {
           setState(() {
             _subscribedChannels = cachedChannels;
             _videos = cachedVideos;
+            _offset = cachedVideos.length;
             _applyFilter();
             _isLoading = false;
           });
@@ -134,7 +164,7 @@ class _SubscriptionsScreenState extends State<SubscriptionsScreen> {
   Future<void> _loadVideos() async {
     try {
       final channelIds = _subscribedChannels.map((c) => c.id).toList();
-      
+
       if (channelIds.isEmpty) {
         if (mounted) {
           setState(() {
@@ -153,12 +183,13 @@ class _SubscriptionsScreenState extends State<SubscriptionsScreen> {
         targetChannelIds = channelIds;
       }
 
-      // 登録チャンネルの動画を取得
+      // 登録チャンネルの動画を取得（最初の _pageSize 件のみ）
       final videosResponse = await _supabase
           .from('videos')
           .select('*')
           .inFilter('user_id', targetChannelIds)
-          .order('created_at', ascending: false);
+          .order('created_at', ascending: false)
+          .range(0, _pageSize - 1);
 
       final videosData = videosResponse is List<dynamic>
           ? videosResponse
@@ -201,6 +232,10 @@ class _SubscriptionsScreenState extends State<SubscriptionsScreen> {
           .where((video) => video.id.isNotEmpty)
           .toList();
 
+      // ページネーション状態を更新
+      _offset = videos.length;
+      _hasMore = videosData.length == _pageSize;
+
       // キャッシュに保存（動画一覧）
       CacheService.instance.set<List<Video>>(CacheKeys.subscriptionVideos, videos);
 
@@ -225,13 +260,97 @@ class _SubscriptionsScreenState extends State<SubscriptionsScreen> {
   /// チャンネルを選択
   void _selectChannel(String? channelId) {
     if (_selectedChannelId == channelId) return;
-    
+
+    _offset = 0;
+    _hasMore = true;
+    CacheService.instance.invalidate(CacheKeys.subscriptionVideos);
+
     setState(() {
       _selectedChannelId = channelId;
+      _videos = [];
       _isLoading = true;
     });
-    
+
     _loadVideos();
+  }
+
+  /// スクロール末端に達したら追加の動画を取得する
+  Future<void> _loadMoreVideos() async {
+    if (!mounted || _isLoadingMore || !_hasMore) return;
+
+    final channelIds = _subscribedChannels.map((c) => c.id).toList();
+    if (channelIds.isEmpty) return;
+
+    final targetChannelIds = _selectedChannelId != null
+        ? [_selectedChannelId!]
+        : channelIds;
+
+    setState(() => _isLoadingMore = true);
+
+    try {
+      final response = await _supabase
+          .from('videos')
+          .select('*')
+          .inFilter('user_id', targetChannelIds)
+          .order('created_at', ascending: false)
+          .range(_offset, _offset + _pageSize - 1);
+
+      final videosData = response is List<dynamic> ? response : <dynamic>[];
+      if (videosData.isEmpty) {
+        if (mounted) setState(() { _hasMore = false; _isLoadingMore = false; });
+        return;
+      }
+
+      final userIds = videosData
+          .whereType<Map<String, dynamic>>()
+          .map((v) => v['user_id'] as String?)
+          .where((id) => id != null && id.isNotEmpty)
+          .toSet()
+          .toList();
+
+      Map<String, dynamic> profilesMap = {};
+      if (userIds.isNotEmpty) {
+        final profilesResponse = await _supabase
+            .from('profiles')
+            .select('*')
+            .inFilter('id', userIds);
+        for (final profile in (profilesResponse is List ? profilesResponse : <dynamic>[])) {
+          if (profile is Map<String, dynamic>) {
+            final id = profile['id'] as String?;
+            if (id != null) profilesMap[id] = profile;
+          }
+        }
+      }
+
+      final newVideos = videosData
+          .whereType<Map<String, dynamic>>()
+          .map((videoJson) {
+            final userId = videoJson['user_id'] as String?;
+            if (userId != null && profilesMap.containsKey(userId)) {
+              videoJson['profiles'] = profilesMap[userId];
+            }
+            return Video.fromJsonWithProfile(videoJson);
+          })
+          .where((video) => video.id.isNotEmpty)
+          .toList();
+
+      _offset += videosData.length;
+      _hasMore = videosData.length == _pageSize;
+
+      final allVideos = [..._videos, ...newVideos];
+      CacheService.instance.set<List<Video>>(CacheKeys.subscriptionVideos, allVideos);
+
+      if (mounted) {
+        setState(() {
+          _videos = allVideos;
+          _applyFilter();
+          _isLoadingMore = false;
+        });
+      }
+    } catch (e) {
+      debugPrint('❌ Error loading more subscription videos: $e');
+      if (mounted) setState(() => _isLoadingMore = false);
+    }
   }
 
   /// 動画をタップしたときの処理
@@ -368,6 +487,7 @@ class _SubscriptionsScreenState extends State<SubscriptionsScreen> {
                 child: video.thumbnailUrl != null && video.thumbnailUrl!.isNotEmpty
                     ? CachedNetworkImage(
                         imageUrl: video.thumbnailUrl!,
+                        memCacheWidth: 640,
                         fit: BoxFit.cover,
                         placeholder: (context, url) => Container(
                           color: _ytSurface,
@@ -534,6 +654,7 @@ class _SubscriptionsScreenState extends State<SubscriptionsScreen> {
                         color: _ytRed,
                         backgroundColor: _ytSurface,
                         child: CustomScrollView(
+                          controller: _scrollController,
                           slivers: [
                             // ヘッダー（モバイルのみ表示）
                             if (!isWideScreen)
@@ -651,6 +772,15 @@ class _SubscriptionsScreenState extends State<SubscriptionsScreen> {
                                 ),
                               ),
 
+                            if (_isLoadingMore)
+                              SliverToBoxAdapter(
+                                child: Padding(
+                                  padding: const EdgeInsets.all(16),
+                                  child: Center(
+                                    child: CircularProgressIndicator(color: _ytRed),
+                                  ),
+                                ),
+                              ),
                             const SliverToBoxAdapter(
                                 child: SizedBox(height: 80)),
                           ],
