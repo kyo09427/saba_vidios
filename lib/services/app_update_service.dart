@@ -112,7 +112,7 @@ class AppUpdateService {
         return null;
       }
 
-      final json = jsonDecode(response.body) as Map<String, dynamic>;
+      final json = jsonDecode(utf8.decode(response.bodyBytes)) as Map<String, dynamic>;
       final updateInfo = UpdateInfo.fromJson(json);
 
       // 現在のバージョンコードと比較
