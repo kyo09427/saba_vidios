@@ -70,9 +70,8 @@ class _TimelineScreenState extends State<TimelineScreen> {
   /// コンテンツ読み込み完了後に1回だけ呼び出すことで、スクロール中の
   /// 高コストな RenderBox 計算を排除する。
   void _computeSectionOffsets() {
-    if (!_scrollController.hasClients) return;
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (!mounted) return;
+      if (!mounted || !_scrollController.hasClients) return;
       final newOffsets = <String, double>{};
       for (final key in _sortedMonthKeys) {
         final ctx = _sectionKeys[key]?.currentContext;
