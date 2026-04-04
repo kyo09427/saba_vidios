@@ -1,6 +1,7 @@
 import 'dart:io';
 
 import 'package:flutter/foundation.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_dotenv/flutter_dotenv.dart';
 import 'package:http/http.dart' as http;
 import 'package:open_file/open_file.dart';
@@ -46,11 +47,45 @@ class AppUpdateService {
   AppUpdateService._();
   static final AppUpdateService instance = AppUpdateService._();
 
+  static const _channel = MethodChannel('win.okasis.sabatube/install_permission');
+
   /// ダウンロード進捗 (0.0 〜 1.0)。UI側は ValueListenableBuilder でリッスンする。
   final ValueNotifier<double> downloadProgress = ValueNotifier(0.0);
 
   /// ダウンロード中かどうか
   final ValueNotifier<bool> isDownloading = ValueNotifier(false);
+
+  // ------------------------------------------------------------------
+  // インストール権限チェック
+  // ------------------------------------------------------------------
+
+  /// Android 8.0+ で「提供元不明のアプリ」インストール許可が付与されているか確認する。
+  ///
+  /// Android 8.0 未満や Android 以外のプラットフォームでは true を返す。
+  Future<bool> canInstallPackages() async {
+    if (kIsWeb || !Platform.isAndroid) return true;
+    try {
+      final result = await _channel.invokeMethod<bool>('canInstallPackages');
+      return result ?? true;
+    } catch (e) {
+      debugPrint('❌ AppUpdateService.canInstallPackages: $e');
+      return true;
+    }
+  }
+
+  /// Android の「提供元不明のアプリ」許可設定画面を開く。
+  ///
+  /// 設定画面を開けなかった場合は false を返す。
+  Future<bool> openInstallPermissionSettings() async {
+    if (kIsWeb || !Platform.isAndroid) return false;
+    try {
+      await _channel.invokeMethod('openInstallPermissionSettings');
+      return true;
+    } catch (e) {
+      debugPrint('❌ AppUpdateService.openInstallPermissionSettings: $e');
+      return false;
+    }
+  }
 
   // ------------------------------------------------------------------
   // アップデート確認
@@ -81,7 +116,7 @@ class AppUpdateService {
         return null;
       }
 
-      final json = jsonDecode(response.body) as Map<String, dynamic>;
+      final json = jsonDecode(utf8.decode(response.bodyBytes)) as Map<String, dynamic>;
       final updateInfo = UpdateInfo.fromJson(json);
 
       // 現在のバージョンコードと比較
@@ -129,24 +164,32 @@ class AppUpdateService {
         return null;
       }
 
+      // Content-Length が不明な場合は totalBytes == 0 → 進捗を null（不定）で表示
       final totalBytes = response.contentLength ?? 0;
       int receivedBytes = 0;
 
       final sink = file.openWrite();
-      await for (final chunk in response.stream) {
-        sink.add(chunk);
-        receivedBytes += chunk.length;
-        if (totalBytes > 0) {
-          downloadProgress.value = receivedBytes / totalBytes;
+      try {
+        await for (final chunk in response.stream) {
+          sink.add(chunk);
+          receivedBytes += chunk.length;
+          downloadProgress.value =
+              totalBytes > 0 ? receivedBytes / totalBytes : -1.0;
         }
+      } finally {
+        await sink.close();
       }
-      await sink.close();
 
       downloadProgress.value = 1.0;
       debugPrint('✅ AppUpdateService: APK ダウンロード完了 → $savePath');
       return savePath;
     } catch (e) {
       debugPrint('❌ AppUpdateService.downloadApk: $e');
+      // 中途半端なファイルが残らないよう削除する
+      try {
+        final partial = File('${(await getTemporaryDirectory()).path}/SabaTube_update.apk');
+        if (await partial.exists()) await partial.delete();
+      } catch (_) {}
       return null;
     } finally {
       isDownloading.value = false;
