@@ -26,12 +26,20 @@ class AppBottomNavigationBar extends StatelessWidget {
     switch (index) {
       case 0: // ホーム
         Navigator.of(context).pushReplacement(
-          MaterialPageRoute(builder: (_) => const HomeScreen()),
+          PageRouteBuilder(
+            pageBuilder: (_, __, ___) => const HomeScreen(),
+            transitionDuration: Duration.zero,
+            reverseTransitionDuration: Duration.zero,
+          ),
         );
         break;
       case 1: // タイムライン
         Navigator.of(context).pushReplacement(
-          MaterialPageRoute(builder: (_) => const TimelineScreen()),
+          PageRouteBuilder(
+            pageBuilder: (_, __, ___) => const TimelineScreen(),
+            transitionDuration: Duration.zero,
+            reverseTransitionDuration: Duration.zero,
+          ),
         );
         break;
       case 2: // 投稿
@@ -41,12 +49,20 @@ class AppBottomNavigationBar extends StatelessWidget {
         break;
       case 3: // 登録チャンネル
         Navigator.of(context).pushReplacement(
-          MaterialPageRoute(builder: (_) => const SubscriptionsScreen()),
+          PageRouteBuilder(
+            pageBuilder: (_, __, ___) => const SubscriptionsScreen(),
+            transitionDuration: Duration.zero,
+            reverseTransitionDuration: Duration.zero,
+          ),
         );
         break;
       case 4: // マイページ
         Navigator.of(context).pushReplacement(
-          MaterialPageRoute(builder: (_) => const MyPageScreen()),
+          PageRouteBuilder(
+            pageBuilder: (_, __, ___) => const MyPageScreen(),
+            transitionDuration: Duration.zero,
+            reverseTransitionDuration: Duration.zero,
+          ),
         );
         break;
     }
